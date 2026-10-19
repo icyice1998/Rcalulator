@@ -282,6 +282,7 @@
         if (ox.hypoxemic && ox.aaNormal !== undefined) {
           if (ox.aaWide) lines.push('Mechanism (wide A-a, low P/F): V/Q mismatch, shunt, diffusion abnormality, low ScvO2');
           else lines.push(`Mechanism (normal A-a): ${v.paco2 > RANGE.paco2High ? 'alveolar hypoventilation (PaCO2 high)' : 'low PiO2 (altitude) or alveolar hypoventilation'}`);
+          lines.push(...Workup.ddx(ox.aaWide ? 'hypoxWide' : 'hypoxNormal'));
         }
       }
       out.steps.push({ title: '1  Oxygenation', lines, flag: ox.hypoxemic || ox.aaWide });
@@ -294,7 +295,8 @@
     const vLines = [`PaCO2 ${v.paco2} mmHg: ${vent.status}`];
     if (vent.vdvt !== undefined) {
       vLines.push(`Vd/Vt = (PaCO2 - PetCO2) / PaCO2 = ${r2(vent.vdvt)} (normal 0.3)`);
-      if (vent.vdHigh) vLines.push('  Increased dead space: emphysema, low cardiac output / pulmonary embolism, high PEEP / auto-PEEP');
+      if (vent.vdHigh) vLines.push('  Increased dead space: emphysema, low cardiac output / pulmonary embolism, high PEEP / auto-PEEP',
+        ...Workup.ddx('deadspace'));
     }
     out.steps.push({ title: '2  Ventilation', lines: vLines, flag: vent.status !== 'Normal ventilation' || vent.vdHigh });
 

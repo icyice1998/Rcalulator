@@ -3,6 +3,67 @@
   const r1 = x => Math.round(x * 10) / 10;
   const has = (...xs) => xs.every(x => x !== null && x !== undefined && !Number.isNaN(x));
 
+  // Top 5 differential diagnoses for each terminal branch, most common first
+  const DDX = {
+    hagma: ['Lactic acidosis (sepsis, shock)', 'Diabetic ketoacidosis', 'Advanced kidney failure (GFR < 20)',
+      'Toxic alcohol (methanol, ethylene glycol)', 'Salicylate intoxication'],
+    lactic: ['Septic shock', 'Hypovolemic / cardiogenic shock', 'Mesenteric ischemia',
+      'Drug-induced type B (metformin, NRTI, propofol)', 'Liver failure / thiamine deficiency'],
+    keto: ['Diabetic ketoacidosis', 'Euglycemic DKA (SGLT2 inhibitor, pregnancy)', 'Alcoholic ketoacidosis',
+      'Starvation ketoacidosis', 'Salicylate intoxication (mixed ketosis + lactate)'],
+    renal: ['Oliguric acute kidney injury', 'CKD stage 4-5', 'Rhabdomyolysis with AKI',
+      'Tumor lysis syndrome', 'Obstructive uropathy'],
+    toxicAlcohol: ['Methanol', 'Ethylene glycol', 'Propylene glycol (lorazepam / diazepam infusion)',
+      'Ethanol with alcoholic ketoacidosis', 'Diethylene glycol'],
+    nonLK: ['Salicylate intoxication', 'Toluene (early, glue sniffing)', 'Pyroglutamic acidosis (paracetamol)',
+      'D-lactic acidosis (short bowel)', 'Cell lysis (rhabdomyolysis, TLS, hemolysis)'],
+    nagma: ['Diarrhea', 'Large-volume normal saline', 'Distal RTA (Sjogren, lithium)',
+      'Type 4 RTA (diabetes, ACEi/ARB, spironolactone)', 'Proximal RTA (acetazolamide, tenofovir)'],
+    gi: ['Diarrhea (infectious, laxative)', 'High-output ileostomy / pancreatic or biliary fistula',
+      'Ureteral diversion (ileal conduit)', 'Large-volume normal saline (dilutional)', 'Proximal RTA'],
+    prta: ['Carbonic anhydrase inhibitor (acetazolamide, topiramate)', 'Tenofovir / ifosfamide (Fanconi)',
+      'Multiple myeloma (light chain)', 'Heavy metals (lead, cadmium)', 'Toluene (late phase)'],
+    falsePosUnc: ['Ketoacidosis (ketoaciduria)', 'Toluene (hippurate)', 'D-lactic acidosis',
+      'Salicylate intoxication', 'Bicarbonaturia (pRTA, alkali therapy)'],
+    drta: ['Sjogren syndrome', 'Lithium', 'Toluene (glue sniffing)', 'Amphotericin B',
+      'Southeast Asian ovalocytosis (AE1)'],
+    hyperK: ['Diabetic hyporeninemic hypoaldosteronism', 'ACEi / ARB / spironolactone',
+      'Trimethoprim (high dose)', 'Obstructive uropathy', 'Primary adrenal insufficiency'],
+    voltage: ['Trimethoprim (high dose)', 'Amiloride / triamterene', 'Partial obstructive uropathy',
+      'Pentamidine', 'Lithium'],
+    type4: ['Diabetic hyporeninemic hypoaldosteronism', 'ACEi / ARB / spironolactone',
+      'NSAID / calcineurin inhibitor', 'Heparin / LMWH', 'Primary adrenal insufficiency'],
+    metAlk: ['Vomiting / NG suction', 'Diuretic use', 'Primary aldosteronism',
+      'Post-hypercapnic alkalosis', 'Exogenous alkali (NaHCO3, citrate, transfusion)'],
+    clResp: ['Vomiting / NG suction', 'Remote diuretic use', 'Post-hypercapnic alkalosis',
+      'Laxative abuse / villous adenoma', 'Congenital chloridorrhea'],
+    clResist: ['Current diuretic use', 'Primary aldosteronism', 'Gitelman syndrome',
+      'Severe hypokalemia / hypomagnesemia', 'Bartter syndrome'],
+    clResHT: ['Primary aldosteronism', 'Renovascular hypertension', 'Cushing syndrome / ectopic ACTH',
+      'Liddle syndrome', 'Licorice / apparent mineralocorticoid excess'],
+    clResNormo: ['Current loop / thiazide diuretic', 'Gitelman syndrome', 'Bartter syndrome',
+      'Hypomagnesemia', 'Severe hypokalemia'],
+    pa: ['Aldosterone-producing adenoma', 'Bilateral adrenal hyperplasia', 'Glucocorticoid-remediable aldosteronism',
+      'Adrenocortical carcinoma', 'Familial hyperaldosteronism (type II-IV)'],
+    secAldo: ['Renovascular hypertension (RAS)', 'Diuretic use', 'Malignant hypertension',
+      'Renin-secreting tumor', 'Coarctation of aorta'],
+    lowLow: ['Licorice / acquired AME', 'Liddle syndrome', 'Cushing syndrome / ectopic ACTH',
+      'Congenital adrenal hyperplasia (11B / 17A)', 'Apparent mineralocorticoid excess (congenital)'],
+    respAcid: ['COPD exacerbation', 'Opioid / sedative overdose', 'Neuromuscular weakness (GBS, myasthenia)',
+      'Obesity hypoventilation syndrome', 'Severe asthma / pneumonia with fatigue'],
+    respAlk: ['Sepsis', 'Pulmonary embolism', 'Pneumonia / pulmonary edema',
+      'Pain / anxiety', 'Liver failure, pregnancy, salicylate'],
+    hypoxWide: ['Pneumonia', 'ARDS', 'Cardiogenic pulmonary edema', 'Pulmonary embolism', 'COPD / asthma (V/Q mismatch)'],
+    hypoxNormal: ['Opioid / sedative overdose', 'Neuromuscular weakness', 'Obesity hypoventilation',
+      'High altitude (low PiO2)', 'Brainstem lesion / chest wall disease'],
+    deadspace: ['Pulmonary embolism', 'Low cardiac output / shock', 'Emphysema',
+      'High PEEP / auto-PEEP', 'Late ARDS'],
+  };
+
+  function ddx(key) {
+    return ['', 'Top 5 differential diagnoses:', ...DDX[key].map((d, i) => `  ${i + 1}. ${d}`)];
+  }
+
   // ---------- Normal anion gap metabolic acidosis ----------
 
   function nagma(v) {
@@ -12,6 +73,7 @@
     if (!has(v.una, v.uk, v.ucl)) {
       lines.push('Enter urine Na, K, Cl (spot urine taken while pH < 7.35) to evaluate renal NH4+ excretion');
       res.missing = true;
+      lines.push(...ddx('nagma'));
       return res;
     }
 
@@ -43,24 +105,30 @@
 
     const impaired = uog !== null ? uog < 100 : unc >= 0;
     res.impaired = impaired;
+    let key;
 
     if (impaired) {
       lines.push('');
       lines.push('Impaired NH4+ excretion: distal RTA group');
       if (!has(v.k)) {
         lines.push('Enter serum K to subtype');
+        key = 'drta';
       } else if (v.k <= 5.0) {
+        key = 'drta';
         lines.push(`Serum K ${v.k} (low/normal): Classical (secretory) or backleak dRTA - expect urine pH > 5.5`);
         lines.push('  Causes: Sjogren, SLE, RA, PBC, lithium, amphotericin B, toluene, SAO (AE1), obstructive uropathy, hereditary');
         if (has(v.uph) && v.uph < 5.5) lines.push('  Urine pH < 5.5 is atypical for dRTA - re-check (UTI, sample handling)');
       } else {
         if (!has(v.uph)) {
           lines.push(`Serum K ${v.k} (high): enter urine pH - > 5.5 voltage-dependent dRTA, < 5.5 type 4 RTA`);
+          key = 'hyperK';
         } else if (v.uph > 5.5) {
+          key = 'voltage';
           lines.push(`Serum K ${v.k} (high), urine pH ${v.uph} > 5.5: Voltage-dependent dRTA`);
           lines.push('  Causes: amiloride, triamterene, trimethoprim (high dose), pentamidine, lithium, partial obstructive uropathy');
         } else {
           lines.push(`Serum K ${v.k} (high), urine pH ${v.uph} <= 5.5: Type 4 RTA (hypo- / pseudohypoaldosteronism)`);
+          key = 'type4';
           lines.push('  Aldosterone deficiency: Addison, CAH, heparin/LMWH, hyporeninemic (DM, AIDS, TIN, NSAID, ACEi/ARB, CNI)');
           lines.push('  Aldosterone resistance: PHA type 1-3 (type 2 = Gordon)');
         }
@@ -74,6 +142,8 @@
       if (has(v.k) && v.k < 3.5)
         lines.push(`  Hypokalemia with urine K ${has(v.uk) ? v.uk : '-'}: ` +
           (v.uk > 15 ? 'renal K loss (> 15) favours pRTA' : 'low urine K (<= 15) favours GI loss'));
+      key = unc >= 0 && uog !== null ? 'falsePosUnc'
+        : has(v.k) && v.k < 3.5 && v.uk > 15 ? 'prta' : 'gi';
     }
 
     if (has(v.uhco3, v.hco3, v.scr, v.ucr)) {
@@ -83,8 +153,12 @@
       lines.push(`FE HCO3 = (UHCO3 x SCr) / (SHCO3 x UCr) x 100 = ${r1(fe)}%: ` +
         (fe > 15 ? '> 15%, proximal RTA' : fe < 5 ? '< 5%, normal proximal reabsorption' : '5-15%, indeterminate'));
       lines.push('  Valid during bicarbonate loading with serum HCO3 near normal (> 18-20)');
-      if (fe > 15) lines.push('  Check Fanconi: glycosuria with normal blood glucose, phosphaturia, aminoaciduria, uricosuria');
+      if (fe > 15) {
+        lines.push('  Check Fanconi: glycosuria with normal blood glucose, phosphaturia, aminoaciduria, uricosuria');
+        if (!impaired) key = 'prta';
+      }
     }
+    lines.push(...ddx(key));
     return res;
   }
 
@@ -139,6 +213,13 @@
     } else {
       lines.push('Enter measured serum osmolality, BUN and glucose to calculate serum osmolal gap');
     }
+    const entered = has(v.lactate) || has(v.ketone) || has(v.egfr);
+    const key = res.og > 25 ? 'toxicAlcohol'
+      : explained.includes('lactate') ? 'lactic'
+        : explained.includes('ketone') ? 'keto'
+          : explained.includes('renal') ? 'renal'
+            : entered ? 'nonLK' : 'hagma';
+    lines.push(...ddx(key));
     return res;
   }
 
@@ -148,16 +229,19 @@
     const lines = [];
     const res = { lines, flag: true };
     lines.push('First exclude exogenous alkali: NaHCO3, massive transfusion, citrate (CRRT), IV penicillin');
+    let key = 'metAlk';
 
     if (!has(v.ucl)) {
       lines.push('Enter urine Cl (urine Na is unreliable because of bicarbonaturia)');
       res.missing = true;
     } else if (v.ucl < 20) {
       lines.push(`Urine Cl ${v.ucl} < 20: Chloride-responsive (extra-renal salt loss)`);
+      key = 'clResp';
       lines.push('  Vomiting / NG drain, villous adenoma, congenital chloridorrhea, laxative, cystic fibrosis,');
       lines.push('  post-hypercapnia, non-reabsorbable anion, remote diuretic use');
     } else {
       lines.push(`Urine Cl ${v.ucl} >= 20: Chloride-resistant (or current diuretic) - assess BP / volume`);
+      key = v.bp === 'high' ? 'clResHT' : v.bp === 'low' ? 'clResNormo' : 'clResist';
       if (v.bp === 'high') {
         lines.push('  Hypertension: mineralocorticoid excess - check PAC / PRA');
       } else if (v.bp === 'low') {
@@ -182,16 +266,20 @@
       lines.push(`PAC ${v.pac} ng/dL, PRA ${v.pra} ng/mL/h, ARR ${Number.isFinite(arr) ? r1(arr) : '-'}`);
       if (pacHigh && praLow && arr > 20) {
         lines.push('  High PAC / low PRA: Primary aldosteronism or GRA (FH-I)');
+        key = 'pa';
       } else if (pacHigh && !praLow) {
         lines.push('  High PAC / high PRA: Secondary hyperaldosteronism');
+        key = 'secAldo';
         lines.push('  Renovascular HT, renin-secreting tumor, malignant HT (or diuretic / vomiting if normotensive)');
       } else if (!pacHigh && praLow) {
         lines.push('  Low PAC / low PRA: non-aldosterone mineralocorticoid effect');
+        key = 'lowLow';
         lines.push('  AME / licorice, Liddle, Cushing / ectopic ACTH, CAH, DOC-producing tumor, Geller');
       } else {
         lines.push('  Pattern indeterminate - interpret with assay reference ranges');
       }
     }
+    lines.push(...ddx(key));
     return res;
   }
 
@@ -206,6 +294,7 @@
       '  Lung parenchyma (low VT, high Vd/Vt): pneumonia, CHF, ARDS, ILD',
       '  Airway (high Vd/Vt, auto-PEEP): COPD, asthma',
       '  Thoracic (low compliance): chest wall deformity, pleural disease, abdominal compartment syndrome',
+      ...ddx('respAcid'),
     ] };
   }
 
@@ -214,10 +303,11 @@
       'Primary hyperventilation: pain, anxiety, fever, CNS disorders, sepsis, liver failure, pregnancy,',
       '  drugs (salicylate, progesterone, theophylline, beta-agonist), mechanical ventilation',
       'Secondary hyperventilation: pneumonia, CHF, asthma, pulmonary embolism, restrictive lung disease',
+      ...ddx('respAlk'),
     ] };
   }
 
-  const api = { nagma, hagma, metAlkalosis, respAcidosis, respAlkalosis };
+  const api = { nagma, hagma, metAlkalosis, respAcidosis, respAlkalosis, ddx };
   if (typeof window !== 'undefined') window.AcidBaseWorkup = api;
   if (typeof module !== 'undefined') module.exports = api;
 })();
