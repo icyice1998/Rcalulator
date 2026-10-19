@@ -1,306 +1,356 @@
-// Asthma topic: diagnosis, assessment, stepwise treatment, difficult-to-treat and severe asthma, exacerbation
+// Asthma topic following the Thai Asthma Guideline in Adults 2025 (TAC)
 (function () {
   const Topic = typeof window !== 'undefined' && window.Topic ? window.Topic : require('../topic.js');
 
   const DX_TREE = {
-    id: 'ad', text: 'Chronic or recurrent respiratory symptoms', note: 'Wheeze, dyspnea, chest tightness, cough varying over time',
+    id: 'ad', text: 'Suspected asthma', note: 'Key: cough, wheeze, dyspnea, chest tightness',
+    children: [{
+      id: 'sym', text: 'Supportive features?', note: 'Night or early morning; triggered by allergen, cold air, exercise or viral infection; variable over time',
+      children: [{
+        id: 'lf', edge: 'Yes', text: 'Confirm with lung function', note: 'Serial PEFR or spirometry with BDR',
+        children: [
+          { id: 'conf', edge: 'PEFR variability >= 10% or BDR positive', text: 'Asthma confirmed' },
+          {
+            id: 'chal', edge: 'Not confirmed', text: 'Airway responsiveness test',
+            children: [
+              { id: 'pos', edge: 'Methacholine FEV1 fall >= 20% or exercise >= 10%', text: 'Asthma confirmed' },
+              { id: 'neg', edge: 'Negative', text: 'Look for alternative diagnosis' },
+            ],
+          },
+        ],
+      }],
+    }],
+  };
+
+  const ADJUST_TREE = {
+    id: 'rev', text: 'Assess control and risk', note: 'Assess - Adjust - Review cycle',
     children: [
       {
-        id: 'hi', edge: 'Typical + supportive history', text: 'High pre-test likelihood',
-        children: [{
-          id: 'spiroH', text: 'Spirometry with BDR or PEF variability',
-          children: [
-            { id: 'defLF', edge: 'Variable airflow', text: 'Definite asthma', note: 'Lung function confirmed' },
-            {
-              id: 'notconf', edge: 'Not confirmed', text: 'Biomarkers or challenge',
-              children: [
-                { id: 'bio', edge: 'BEC or FeNO high', text: 'Biomarker-supported asthma' },
-                { id: 'bc', edge: 'Challenge positive', text: 'Definite asthma', note: 'Challenge confirmed' },
-              ],
-            },
-          ],
-        }],
+        id: 'ok', edge: 'Controlled >= 12 months', text: 'Major exacerbation risk factor?',
+        children: [
+          { id: 'keep', edge: 'Yes', text: 'Keep treatment 12 more months' },
+          {
+            id: 'down', edge: 'No', text: 'Step down',
+            children: [{ id: 'cr', edge: 'Controlled, no exacerbation, normal FEV1 >= 1 year', text: 'Clinical remission',
+              children: [{ id: 'comp', edge: 'Normal FeNO and methacholine', text: 'Complete remission' }] }],
+          },
+        ],
       },
+      { id: 'up', edge: 'Not controlled within 1-3 months', text: 'Step up', note: 'After checking technique, adherence, triggers, comorbidities' },
+    ],
+  };
+
+  const ED_TREE = {
+    id: 'ed', text: 'Acute asthma in ED', note: 'Assess airway, breathing, circulation',
+    children: [
+      { id: 'icu', edge: 'Drowsy, confused, air hunger or cyanosis', text: 'ICU admission', note: 'Consider intubation; treat as severe' },
       {
-        id: 'lo', edge: 'Atypical symptoms', text: 'Low pre-test likelihood',
-        children: [{
-          id: 'spiroL', text: 'Spirometry with BDR',
-          children: [{
-            id: 'chal', text: 'Bronchial challenge',
+        id: 'grade', edge: 'None of these', text: 'Grade severity',
+        children: [
+          { id: 'mm', edge: 'Not agitated, PR 100-120, SpO2 90-95%', text: 'Mild to moderate', note: 'RABA + SCS + O2' },
+          { id: 'sv', edge: 'Agitated, RR > 30, accessory muscles, PR > 120, SpO2 < 90%', text: 'Severe', note: 'RABA + ipratropium + SCS + O2, IV MgSO4' },
+          {
+            id: 'resp', edge: 'Reassess at 1 h', text: 'Symptoms and signs',
             children: [
-              { id: 'possible', edge: 'Variable / positive', text: 'Possible asthma', note: 'Exclude alternatives' },
-              { id: 'noasthma', edge: 'Negative', text: 'No asthma', note: 'Alternative diagnosis' },
+              { id: 'home', edge: 'Improved, stable', text: 'Discharge', note: 'Controller + prednisolone 30-50 mg <= 5 days + RABA' },
+              { id: 'adm', edge: 'Not improved', text: 'Admit', note: 'Continue treatment, close monitoring' },
             ],
-          }],
-        }],
+          },
+        ],
       },
     ],
   };
 
   const DTT_TREE = {
-    id: 'u', text: 'Uncontrolled on GINA step 4-5', note: 'Symptoms or exacerbations despite medium- or high-dose ICS-LABA',
+    id: 'u', text: 'Uncontrolled on step 4', note: 'Medium-high dose ICS/LABA plus other controllers = difficult-to-treat',
     children: [{
-      id: 'dx', text: 'Confirm the diagnosis', note: 'Variable airflow, BHR, airway inflammation (FeNO, BEC, sputum)',
+      id: 'chk', text: 'Review and correct', note: 'Confirm diagnosis; adherence; inhaler technique; avoid triggers; diagnose and treat comorbidities',
       children: [
-        { id: 'alt', edge: 'Not confirmed', text: 'Consider alternative diagnosis', note: 'VCD / ILO, COPD, bronchiectasis, HF' },
+        { id: 'ctl', edge: 'Controlled', text: 'Difficult-to-treat asthma', note: 'Not severe; step down slowly' },
         {
-          id: 'adh', edge: 'Confirmed', text: 'Check inhaler technique and adherence', note: 'History, dose counter, pharmacy refill',
+          id: 'sev', edge: 'Still uncontrolled', text: 'Severe asthma', note: 'Consult or refer specialist',
           children: [
-            { id: 'fix', edge: 'Poor', text: 'Educate, correct, review in 3-6 months' },
-            {
-              id: 'com', edge: 'Satisfactory', text: 'Treat comorbidities and risk factors',
-              note: 'CRS / nasal polyps, obesity, GERD, OSA, ILO, anxiety-depression, smoking, allergen, EGPA, ABPA',
-              children: [
-                { id: 'ctl', edge: 'Controlled', text: 'Difficult-to-treat asthma', note: 'Step down slowly' },
-                {
-                  id: 'sev', edge: 'Still uncontrolled', text: 'Severe asthma', note: 'Refer; assess phenotype',
-                  children: [
-                    {
-                      id: 't2', edge: 'BEC >= 150, FeNO >= 20, allergen-driven or OCS-dependent', text: 'Type 2 high',
-                      note: 'Biologic by phenotype; add-on LAMA',
-                    },
-                    {
-                      id: 'nont2', edge: 'No type 2 marker', text: 'Type 2 low',
-                      note: 'Add-on LAMA, azithromycin, anti-TSLP; repeat biomarkers on lowest OCS',
-                    },
-                  ],
-                },
-              ],
-            },
+            { id: 't2', edge: 'BEC >= 150, SPT or sIgE positive, FeNO >= 20 or sputum eos >= 2%', text: 'Type 2 high', note: 'Add-on biologic' },
+            { id: 'nt2', edge: 'None of these', text: 'Non-type 2', note: 'LAMA, low-dose macrolide, thermoplasty, anti-TSLP' },
           ],
         },
       ],
     }],
   };
 
-  const EX_TREE = {
-    id: 'ex', text: 'Asthma exacerbation', note: 'Assess ABC, triage by worst feature',
+  const BIO_TREE = {
+    id: 'b', text: 'Severe asthma despite medium-high ICS/LABA + other controllers', note: 'Check BEC, FeNO; atopic dermatitis, CRSwNP, AR, eosinophilic pneumonia, EGPA',
     children: [
-      { id: 'lt', edge: 'Drowsy, confused, silent chest', text: 'Life-threatening', note: 'ICU, SABA, O2, prepare intubation' },
-      { id: 'sv', edge: 'Words, RR > 30, HR > 120, SpO2 < 90, PEF <= 50%', text: 'Severe', note: 'SABA + ipratropium, O2, steroid, IV Mg' },
-      { id: 'mm', edge: 'Phrases, HR 100-120, SpO2 90-95, PEF > 50%', text: 'Mild to moderate', note: 'SABA, O2, oral steroid' },
       {
-        id: 'reass', edge: '1 h after treatment', text: 'FEV1 or PEF',
+        id: 'e1', edge: 'BEC < 150', text: 'FeNO',
         children: [
-          { id: 'disch', edge: '60-80% and improved', text: 'Plan discharge' },
-          { id: 'cont', edge: '< 60% or poor response', text: 'Continue, reassess, consider ICU' },
+          {
+            id: 'f1', edge: '< 25 ppb', text: 'Allergic with perennial allergy?',
+            children: [
+              { id: 'f1y', edge: 'Yes', text: 'Anti-IgE or anti-TSLP' },
+              { id: 'f1n', edge: 'No', text: 'Anti-TSLP' },
+            ],
+          },
+          {
+            id: 'f2', edge: '>= 25 ppb', text: 'Allergic with perennial allergy?',
+            children: [
+              { id: 'f2y', edge: 'Yes', text: 'Anti-IgE, anti-IL4R alpha or anti-TSLP' },
+              { id: 'f2n', edge: 'No', text: 'Anti-IL4R alpha or anti-TSLP' },
+            ],
+          },
         ],
       },
+      { id: 'e2', edge: 'BEC 150-1500', text: 'Integrate clinical features and comorbidity', note: 'Anti-IgE, anti-IL4R alpha, anti-IL5, anti-IL5R or anti-TSLP' },
+      { id: 'e3', edge: 'BEC > 1500', text: 'Exclude parasites, hematologic and other hypereosinophilic disease', note: 'Anti-IL5 or anti-IL5R' },
     ],
   };
 
   const TOPIC = {
     title: 'Asthma',
-    subtitle: 'Chest',
-    lead: 'A heterogeneous disease with chronic airway inflammation, defined by variable respiratory symptoms (wheeze, dyspnea, chest tightness, cough) together with variable expiratory airflow limitation.',
+    subtitle: 'Chest - Thai Asthma Guideline in Adults 2025 (TAC)',
+    lead: 'A chronic disease with airway inflammation and narrowing that varies over time. About half of Thai patients with asthma are not yet well controlled, and many do not receive inhaled corticosteroid continuously. Good care needs correct diagnosis, appropriate symptom management, treatment of comorbidities and continuous follow-up.',
     sections: [
       {
-        id: 'patho', title: 'Pathophysiology',
+        id: 'goal', title: '1  Treatment goal: remission',
         blocks: [
+          { p: 'The long-term goal is remission: no asthma symptoms for at least 12 months.' },
+          { table: { head: ['Level', 'Criteria'], rows: [
+            ['Clinical remission', 'Asthma controlled, no exacerbation, and normal lung function for at least 1 year'],
+            ['Complete remission', 'Clinical remission plus normal airway responsiveness and inflammation: methacholine challenge normal (TAC threshold PC20 8 mg/mL) and FeNO < 25 ppb'],
+          ] } },
+          { sub: 'Pathophysiology in brief' },
           { ul: [
-            'Airway inflammation: mast cells, eosinophils, Th2 lymphocytes, IgE, leukotrienes; neutrophils in some phenotypes',
-            'Airway hyperresponsiveness: exaggerated bronchoconstriction to triggers',
-            'Remodeling from chronic injury-repair: smooth muscle hypertrophy, goblet cell metaplasia, collagen deposition, mucus hypersecretion; can lead to fixed obstruction',
-            'Endotypes: type 2 high (allergic, eosinophilic; steroid responsive) and type 2 low (neutrophilic or paucigranulocytic; obesity, smoking)',
+            'Airway inflammation (mast cells, eosinophils, Th2 cells, IgE; neutrophils in some), airway hyperresponsiveness, and remodeling that may become fixed',
+            'Most Thai patients with severe asthma are type 2 high with raised blood eosinophils',
           ] },
         ],
       },
       {
-        id: 'clinical', title: 'Clinical features',
+        id: 'assess', title: 'Assessment of control and risk',
         blocks: [
-          { sub: 'Symptoms that support asthma' },
-          { ul: [
-            'More than one of wheeze, shortness of breath, chest tightness, cough',
-            'Vary over time and in intensity; often worse at night or on waking',
-            'Triggered by exercise, laughter, allergens, cold air; worsening after exercise ends is very distinctive',
-            'Appear or worsen with viral infections',
-          ] },
-          { sub: 'Risk factors and triggers' },
-          { table: { head: ['Endogenous', 'Environmental', 'Triggers'], rows: [
-            ['Atopy, airway hyperresponsiveness', 'Indoor and outdoor allergens', 'House dust mite, animal dander, cockroach, pollen, fungi'],
-            ['Genetics, sex, ethnicity', 'Occupational sensitizers', 'Drugs: aspirin, NSAIDs, beta-blockers, ACE inhibitors'],
-            ['', 'Obesity, early viral infection, tobacco smoke', 'Exercise, cold air, emotion, irritants, pollution, infection'],
+          { table: { head: ['In the last 4 weeks, has the patient had', 'Controlled'], rows: [
+            ['Daytime asthma symptoms', 'None of the 4 items for 1 month'],
+            ['Night waking due to asthma', ''],
+            ['RABA use for symptom relief', ''],
+            ['Activity limitation due to asthma', ''],
           ] } },
-          { sub: 'Examination' },
+          { note: 'Any one item present: review and assess to adjust treatment.' },
+          { sub: 'Major risk factors for future exacerbation' },
           { ul: [
-            'Chest: wheeze on normal breathing or prolonged expiration; often normal between episodes',
-            'Upper airway: rhinitis, nasal polyps',
-            'Skin: eczema, urticaria, atopic dermatitis',
+            'Severe exacerbation in the past year',
+            'Ever intubated for asthma',
+            'FEV1 < 60% predicted',
+            'High bronchodilator responsiveness > 20%',
+            'Comorbidities: allergic rhinitis or chronic rhinosinusitis, GERD, obesity, stress and depression',
           ] },
         ],
       },
       {
-        id: 'diagnosis', title: 'Diagnostic criteria (GINA)',
+        id: 'dx', title: '2  Diagnosis in adults',
         blocks: [
-          { p: 'Diagnosis needs both a history of variable respiratory symptoms and confirmed variable expiratory airflow. Airflow limitation need not be present at the time of testing; test during symptoms or in the morning when possible, and before starting ICS.' },
-          { table: { head: ['Test (adults)', 'Positive result'], rows: [
-            ['Bronchodilator responsiveness', 'FEV1 or FVC increase >= 12% and >= 200 mL (more confident if >= 15% and >= 400 mL) 10-15 min after salbutamol 200-400 mcg; or PEF increase >= 20%'],
-            ['PEF variability', 'Average daily diurnal variability > 10% over 2 weeks; variability = (max - min) / mean x 100'],
-            ['Trial of ICS', 'FEV1 increase >= 12% and >= 200 mL (or PEF >= 20%) after 4 weeks of ICS-containing treatment'],
-            ['Bronchial challenge', 'FEV1 fall >= 20% with methacholine; >= 15% with mannitol, hypertonic saline or hyperventilation; > 10% and > 200 mL with exercise'],
-            ['Variation between visits', 'FEV1 change >= 12% and >= 200 mL (or PEF >= 20%); specific but not sensitive'],
+          { table: { head: ['Key symptoms', 'Supportive features'], rows: [
+            ['Cough, wheeze, dyspnea, chest tightness', 'Symptoms at night or early morning; triggered by allergen, cold air, exercise or viral infection; symptoms and severity vary over time'],
           ] } },
-          { note: 'Bronchial challenge contraindications (SMUK): severe airflow limitation (FEV1 < 50% or < 1 L), MI or stroke within 3 months, uncontrolled hypertension, known aortic aneurysm. A negative challenge may be false if tested out of season, long after occupational exposure, or on recent steroid.' },
-          { sub: 'Levels of diagnostic certainty' },
+          { p: 'Plus abnormal lung function shown by one of the following:' },
+          { table: { head: ['Test', 'Positive'], rows: [
+            ['Serial PEFR (twice daily for 2 weeks)', 'PEFR variability >= 10%'],
+            ['PEF bronchodilator response', 'Increase >= 20%'],
+            ['Spirometry with bronchodilator', 'FEV1 increase >= 12% and >= 200 mL 10-15 min after salbutamol 200-400 mcg'],
+            ['Spirometry after treatment', 'FEV1 increase >= 12% and >= 200 mL after 4 weeks of treatment'],
+            ['Methacholine challenge', 'FEV1 fall >= 20%'],
+            ['Exercise challenge', 'FEV1 fall >= 10% and >= 200 mL'],
+          ] } },
           { tree: DX_TREE },
-          { sub: 'Type 2 biomarkers' },
-          { table: { head: ['Biomarker', 'High', 'Higher in', 'Lower in'], rows: [
-            ['Blood eosinophils', '>= upper limit of normal; on high-dose ICS >= 150/uL suggests type 2, >= 300/uL common biologic threshold',
-              'Men, morning, smokers, parasites, allergy, EGPA', 'OCS, inhaled or nasal steroid'],
-            ['FeNO', 'ICS-naive > 50 ppb; medium-dose ICS >= 25 ppb; high-dose ICS >= 20 ppb',
-              'Men, afternoon, atopic dermatitis, allergic rhinitis, after allergen', 'Smokers, bronchoconstriction, ICS or OCS'],
-          ] } },
-          { note: 'Raised FeNO or eosinophils support type 2 asthma in a patient with typical symptoms; low values do not exclude asthma.' },
-        ],
-      },
-      {
-        id: 'ddx', title: 'Differential diagnosis',
-        blocks: [
+          { sub: 'Differential diagnosis' },
           { table: { head: ['Group', 'Conditions'], rows: [
-            ['Upper airway', 'Foreign body, postnasal drip, upper airway obstruction, vocal cord dysfunction (inducible laryngeal obstruction), tracheobronchomalacia'],
+            ['Upper airway', 'Foreign body, postnasal drip, upper airway obstruction, vocal cord dysfunction, tracheobronchomalacia'],
             ['Pulmonary', 'COPD, bronchiectasis, ABPA, EGPA, cystic fibrosis, ILD, lung cancer, pneumonia, pneumothorax, sarcoidosis'],
             ['Cardiac', 'Left ventricular failure, mitral valve disease, angina'],
-            ['Other', 'GERD, obesity, anemia, hyperventilation, carcinoid, mastocytosis, functional'],
+            ['Other', 'GERD, obesity, anemia, hyperventilation, carcinoid, mastocytosis'],
           ] } },
           { sub: 'Asthma vs COPD' },
           { table: { head: ['Feature', 'Asthma', 'COPD'], rows: [
             ['Onset', 'Childhood or early adulthood', 'Usually > 40 years, smoking, biomass, post-TB'],
             ['Reversibility', 'Largely reversible', 'Partially reversible, progressive'],
             ['Inflammation', 'Type 2 eosinophilic', 'Neutrophilic'],
-            ['Associations', 'Allergy, eczema, rhinitis', 'Chronic bronchitis, emphysema'],
             ['Lung function', 'May be normal between episodes', 'Persistently obstructive, declines'],
             ['Symptoms', 'Variable, night or early morning', 'Persistent, exertional'],
-            ['ICS response', 'Good', 'Inconsistent'],
           ] } },
         ],
       },
       {
-        id: 'assess', title: 'Assessment of control and risk',
+        id: 'cycle', title: 'Principles of care: Assess - Adjust - Review',
         blocks: [
-          { table: { head: ['In the past 4 weeks', 'Well controlled', 'Partly controlled', 'Uncontrolled'], rows: [
-            ['Daytime symptoms > 2/week; any night waking; reliever > 2/week; any activity limitation', 'None of these', '1-2 of these', '3-4 of these'],
+          { table: { head: ['Step', 'What to do'], rows: [
+            ['Assess', 'Diagnosis, comorbidities, level of control and major risk factors; inhaler technique, adherence, patient goals; clinical and complete remission'],
+            ['Adjust', 'Treatment by level of control; non-drug measures; education about asthma and self-care'],
+            ['Review', 'Treatment response, lung function, side effects, comorbidity control'],
           ] } },
-          { sub: 'Risk factors for exacerbation (any one increases risk)' },
-          { ul: [
-            'High SABA use (>= 3 canisters/year; mortality rises with > 1 canister/month); no ICS; poor adherence or technique',
-            '>= 1 severe exacerbation in the last year; ever intubated or ICU for asthma',
-            'FEV1 < 60% predicted, high bronchodilator responsiveness, raised eosinophils or FeNO',
-            'Obesity, chronic rhinosinusitis, GERD, food allergy, pregnancy; smoking, e-cigarettes, allergen or pollution exposure',
-            'Major psychological or socioeconomic problems',
-          ] },
-          { note: 'Persistent airflow limitation risk: no ICS after severe exacerbation, smoke or occupational exposure, low initial FEV1, sputum or blood eosinophilia. Medication side-effect risk: frequent OCS, high-dose or potent ICS, P450 inhibitors.' },
         ],
       },
       {
-        id: 'treat', title: 'Stepwise treatment (GINA, adults and adolescents)',
+        id: 'start', title: '3  Starting treatment',
         blocks: [
-          { table: { head: ['Step', 'Track 1 (preferred): reliever ICS-formoterol', 'Track 2 (alternative): reliever SABA or ICS-SABA'], rows: [
-            ['1', 'As-needed low-dose ICS-formoterol (AIR-only)', 'Take ICS whenever SABA is taken'],
-            ['2', 'As-needed low-dose ICS-formoterol (AIR-only)', 'Low-dose maintenance ICS'],
-            ['3', 'Low-dose ICS-formoterol maintenance and reliever (MART)', 'Low-dose ICS-LABA'],
-            ['4', 'Medium-dose ICS-formoterol MART', 'Medium-dose ICS-LABA'],
-            ['5', 'Add-on LAMA; refer for phenotype; consider high-dose ICS-formoterol; biologic', 'Add-on LAMA; refer; high-dose ICS-LABA; biologic'],
+          { table: { head: ['Severity / frequency', 'Start with'], rows: [
+            ['Mild: symptoms < 3 times/week and lung function > 80%', 'Daily low-dose ICS'],
+            ['Moderate: symptoms > 4-5 days/week or night symptoms > once/week', 'Low-dose ICS/LABA or medium-dose ICS'],
+            ['Severe: daily symptoms, or night symptoms > once/week, or FEV1 < 60%', 'Medium-high dose ICS/LABA'],
           ] } },
-          { sub: 'Starting treatment' },
-          { table: { head: ['Presentation', 'Start at'], rows: [
-            ['Symptoms < 3-5 days/week, normal or mildly reduced lung function', 'Step 1-2'],
-            ['Symptoms most days, or night waking >= 1/week, or low lung function', 'Step 3'],
-            ['Daily symptoms or night waking >= 1/week with low lung function or recent exacerbation', 'Step 4 (short OCS course may be needed)'],
-          ] } },
-          { p: 'Avoid SABA-only treatment: apparently mild asthma still accounts for 30-37% of acute asthma and 15-27% of asthma deaths. Review 1-3 months after any change; before stepping up, check inhaler technique, adherence, comorbidities and triggers. Step down after 3 months of good control.' },
+          { note: 'Every patient should have a RABA for symptom relief.' },
           { sub: 'ICS daily dose (mcg)' },
-          { table: { head: ['Inhaled corticosteroid', 'Low', 'Medium', 'High'], rows: [
-            ['Beclometasone dipropionate (HFA)', '100-200', '> 200-400', '> 400'],
-            ['Budesonide (DPI)', '200-400', '> 400-800', '> 800'],
-            ['Ciclesonide (HFA)', '80-160', '> 160-320', '> 320'],
-            ['Fluticasone furoate (DPI)', '100', '-', '200'],
-            ['Fluticasone propionate (DPI or HFA)', '100-250', '> 250-500', '> 500'],
-            ['Mometasone furoate', '110-220', '> 220-440', '> 440'],
-          ] } },
-          { sub: 'Bronchodilators' },
-          { table: { head: ['Drug', 'Onset', 'Duration', 'Usual dose'], rows: [
-            ['Salbutamol (SABA)', '< 5 min', '3-6 h', '100-200 mcg as needed'],
-            ['Formoterol (LABA)', '~7 min', '12 h', '12-24 mcg twice daily; reliever with budesonide in MART'],
-            ['Salmeterol (LABA)', '~15 min', '12 h', '50 mcg twice daily'],
-            ['Vilanterol, indacaterol', '~5 min', '24 h', 'Once daily (with ICS)'],
-            ['Tiotropium (LAMA)', 'Slow', '24 h', 'Add-on at step 5 (soft mist 2.5 mcg x 2 puffs daily)'],
-          ] } },
-          { note: 'Side effects: ICS - dysphonia, oral candidiasis (rinse mouth), skin bruising, cataract and osteoporosis at high dose; beta-agonist - tremor, tachycardia, hypokalemia; LAMA - dry mouth, urinary retention.' },
-        ],
-      },
-      {
-        id: 'dtt', title: 'Difficult-to-treat and severe asthma',
-        blocks: [
-          { table: { head: ['Term', 'Definition'], rows: [
-            ['Uncontrolled asthma', 'Poor symptom control and/or frequent exacerbations; may be mild asthma that is not being treated properly'],
-            ['Difficult-to-treat asthma', 'Uncontrolled despite medium- or high-dose ICS-LABA (or maintenance OCS), or needs high-dose treatment to stay controlled. Often due to wrong diagnosis, poor technique or adherence, comorbidities, SABA overuse'],
-            ['Severe asthma', 'Uncontrolled despite adherence to maximal optimized high-dose ICS-LABA and treatment of contributory factors, or worsens when high-dose treatment is reduced. A retrospective label'],
-          ] } },
-          { note: 'Severity by treatment needed once controlled for several months: mild = step 1-2, moderate = step 3, severe = step 4-5 still needed or still uncontrolled.' },
-          { sub: 'Approach' },
-          { tree: DTT_TREE },
-          { sub: 'Contributory factors to correct before labelling severe' },
-          { table: { head: ['Factor', 'What to do'], rows: [
-            ['Incorrect diagnosis', 'Repeat spirometry with BDR, PEF monitoring, challenge; look for VCD/ILO, COPD, bronchiectasis, HF'],
-            ['Inhaler technique', 'Watch the patient use the device; switch device if needed'],
-            ['Adherence', 'Ask non-judgmentally, check dose counter and refills; simplify regimen (MART)'],
-            ['Comorbidities', 'Chronic rhinosinusitis and nasal polyps, obesity, GERD, OSA, anxiety and depression, ILO, ABPA, EGPA'],
-            ['Exposures', 'Smoking, vaping, allergens, occupational agents; NSAID, beta-blocker'],
-            ['SABA overuse', 'Switch to ICS-formoterol reliever'],
-          ] } },
-          { sub: 'Biologics for severe type 2 asthma' },
-          { table: { head: ['Target', 'Drug and dose', 'Choose when', 'Watch for'], rows: [
-            ['Anti-IgE', 'Omalizumab SC every 2-4 weeks, dose by IgE and weight', 'Allergic: sensitized to perennial allergen, total IgE in dosing range, exacerbations', 'Anaphylaxis (rare), injection site'],
-            ['Anti-IL5 / IL5R', 'Mepolizumab 100 mg SC every 4 weeks; benralizumab 30 mg SC every 4 weeks x 3 then every 8 weeks', 'Eosinophilic: BEC >= 150-300/uL, exacerbations, OCS-dependent, nasal polyps', 'Headache, injection site; check helminths'],
-            ['Anti-IL4R alpha', 'Dupilumab 400-600 mg SC load, then 200-300 mg every 2 weeks', 'BEC >= 150 or FeNO >= 25 ppb, OCS-dependent, atopic dermatitis, polyps', 'Transient eosinophilia, conjunctivitis'],
-            ['Anti-TSLP', 'Tezepelumab 210 mg SC every 4 weeks', 'Severe asthma regardless of type 2 markers', 'Pharyngitis, injection site'],
-          ] } },
-          { p: 'Review response after about 4 months. Complete response: continue, taper OCS then ICS (watch for adrenal insufficiency), follow every 3-6 months. Partial response: continue 6-9 more months or switch biologic. No response: stop, re-check contributory factors, switch to another biologic.' },
-          { note: 'Type 2 low options: add-on LAMA, azithromycin 250-500 mg three times weekly (check QTc and sputum for NTM), anti-TSLP, treat obesity; bronchial thermoplasty only in selected centres.' },
-          { sub: 'Special groups' },
-          { table: { head: ['Group', 'Key points'], rows: [
-            ['Obesity', 'Lower lung function, more comorbidity (GERD, OSA, depression), weaker ICS response; weight loss improves control'],
-            ['ABPA', 'Central bronchiectasis, fleeting infiltrates, finger-in-glove, high total IgE and Aspergillus-specific IgE; treat with OCS and/or itraconazole'],
-            ['Exercise-induced', 'Bronchoconstriction peaks 10-15 min after starting exercise, resolves by 60 min; SABA or ICS-formoterol 10 min before exercise; daily ICS if frequent'],
-            ['Work-related', 'Better on weekends and holidays; serial PEF at and away from work; remove exposure'],
-            ['Pregnancy', 'One third improve, one third worsen, one third unchanged; continue ICS; uncontrolled asthma is riskier than treatment'],
+          { table: { head: ['ICS', 'Low dose', 'Medium to high dose'], rows: [
+            ['Beclomethasone dipropionate', '200-500', '> 500'],
+            ['Budesonide', '200-400', '> 400'],
+            ['Fluticasone propionate', '100-250', '> 250'],
+            ['Fluticasone furoate', '100', '200'],
           ] } },
         ],
       },
       {
-        id: 'exac', title: 'Exacerbation',
+        id: 'adjust', title: '4  Adjusting treatment in patients already treated',
         blocks: [
-          { p: 'A progressive increase in shortness of breath, cough, wheeze or chest tightness with a fall in lung function from the patient\'s usual status. Common triggers: viral infection, allergen, pollution, poor ICS adherence.' },
-          { tree: EX_TREE },
-          { table: { head: ['Severity', 'Features (worst feature decides)', 'Treatment'], rows: [
-            ['Mild to moderate', 'Talks in phrases, prefers sitting, not agitated, RR raised, HR 100-120, SpO2 90-95%, PEF > 50%',
-              'Salbutamol 4-10 puffs by pMDI and spacer every 20 min for 1 h; consider ipratropium; O2 to SpO2 93-95%; prednisolone 40-50 mg'],
-            ['Severe', 'Talks in words, hunched, agitated, RR > 30, accessory muscles, HR > 120, SpO2 < 90%, PEF <= 50%',
-              'SABA + ipratropium, O2 93-95%, oral or IV corticosteroid, consider IV magnesium sulfate 2 g over 20 min, consider high-dose ICS'],
-            ['Life-threatening', 'Drowsy, confused, silent chest', 'ICU, SABA and O2, prepare for intubation'],
+          { table: { head: ['Step', 'Controller', 'Reliever'], rows: [
+            ['1', 'Daily low-dose ICS', 'As-needed short-acting bronchodilator, or as-needed low-dose ICS/RABA'],
+            ['2', 'Daily low-dose ICS/LABA', ''],
+            ['3', 'Medium-dose ICS/LABA', ''],
+            ['4', 'Medium-high dose ICS/LABA plus other: SR xanthine, LTRA, LAMA or biologic; low-dose OCS (< 7.5 mg prednisolone/day); consider specialist consultation', ''],
           ] } },
+          { tree: ADJUST_TREE },
+          { note: 'Step up if not controlled within 1-3 months. Step down only when controlled for at least 12 months; if a major exacerbation risk factor is present, keep treatment for 12 months first.' },
+          { note: 'GINA 2025 differs: it prefers as-needed ICS-formoterol (AIR-only) at steps 1-2 and maintenance-and-reliever therapy (MART) at steps 3-5.' },
+          { sub: 'Drug notes' },
+          { table: { head: ['Drug', 'Onset', 'Duration', 'Notes'], rows: [
+            ['Salbutamol (RABA)', '< 5 min', '3-6 h', '100-200 mcg as needed; tremor, tachycardia, hypokalemia'],
+            ['Formoterol (LABA)', '~7 min', '12 h', 'Rapid onset; usable as reliever with ICS'],
+            ['Salmeterol (LABA)', '~15 min', '12 h', 'Not a reliever'],
+            ['ICS', '', '', 'Dysphonia, oral candidiasis (rinse mouth); bruising, cataract, osteoporosis at high dose'],
+            ['LAMA (tiotropium)', 'Slow', '24 h', 'Add-on at step 4; dry mouth, urinary retention'],
+          ] } },
+        ],
+      },
+      {
+        id: 'nondrug', title: '5  Non-pharmacological treatment',
+        blocks: [
+          { table: { head: ['Measure', 'Recommendation'], rows: [
+            ['Smoking cessation', 'Stop cigarettes and e-cigarettes'],
+            ['Exercise and breathing training', 'Regular exercise 20-30 min/session, 5-7 days/week (150 min/week); RABA 15 min before exercise if exercise-induced bronchospasm'],
+            ['Environmental control', 'Adjust home and work environment; avoid allergens and air pollution'],
+            ['Weight reduction', 'In obesity, losing 10% of weight improves lung function and control'],
+            ['Vaccination', 'See below'],
+            ['Bronchial thermoplasty', 'Option for severe asthma not controlled on step 4'],
+          ] } },
+          { sub: 'Vaccines for adults with asthma' },
+          { table: { head: ['Vaccine', 'Recommendation'], rows: [
+            ['Influenza', 'Once yearly'],
+            ['RSV (adjuvanted)', '1 dose for age >= 60 years, or >= 50 years with comorbidity such as asthma'],
+            ['Pneumococcal', 'PCV13 or PCV15 1 dose, then PPSV23 1 dose at least 1 year later'],
+            ['COVID-19', '1 additional dose for age > 65 years; can be given with influenza vaccine'],
+            ['Pertussis', 'Tdap 1 dose every 10 years'],
+            ['Herpes zoster (age >= 50)', 'Recombinant vaccine 2 doses 2-6 months apart (efficacy 88.8% in asthma), or live vaccine 1 dose from age 60'],
+          ] } },
+        ],
+      },
+      {
+        id: 'ed', title: '6  Acute exacerbation in the emergency room',
+        blocks: [
+          { tree: ED_TREE },
+          { table: { head: ['Severity', 'Features', 'Treatment'], rows: [
+            ['Mild to moderate', 'Not agitated, RR increased, accessory muscles not used, PR 100-120, SpO2 90-95%',
+              'RABA nebulized every 20 min for 1 h; prednisolone or dexamethasone; O2 to SpO2 93-95%'],
+            ['Severe', 'Agitated, RR > 30, accessory muscles used, PR > 120, SpO2 < 90%',
+              'RABA + ipratropium nebulized every 20 min for 1 h; dexamethasone IV; O2 to SpO2 93-95%; consider IV magnesium sulfate (usually 2 g over 20 min); consider add-on high-dose ICS nebulization'],
+            ['Life-threatening', 'Drowsy, confused, air hunger or cyanosis', 'ICU admission, consider intubation, treat as severe'],
+          ] } },
+          { p: 'Reassess symptoms and signs 1 hour after treatment. If improved and stable: discharge with clinic follow-up, start or adjust controller, prednisolone 30-50 mg/day for no more than 5 days, and RABA. If not improved: admit, continue treatment and monitor closely.' },
           { sub: 'Risk factors for asthma-related death' },
           { ul: [
-            'Previous intubation or ICU; >= 2 admissions or >= 3 ED visits in the past year; admission or ED visit in the past month',
-            'Using > 2 SABA canisters per month; poor perception of severity; no written action plan',
-            'Low socioeconomic status, illicit drugs, psychosocial problems; cardiovascular, chronic lung or psychiatric disease',
-          ] },
-          { sub: 'Discharge' },
-          { ul: [
-            'Good response: no tachypnea, minimal wheeze, able to speak, PEF > 80% (60-80% may be discharged with close follow-up), SpO2 > 94% on room air',
-            'Prednisolone 40-50 mg/day for 5-7 days',
-            'Start ICS if not already on it; step up ICS for 2-4 weeks; move reliever back to as-needed',
-            'Review triggers and inhaler technique, give a written action plan; follow up within 2-7 days',
+            'Previous intubation or ICU; >= 2 admissions or >= 3 ED visits in the past year; recent admission or ED visit',
+            'High SABA use (> 1-2 canisters/month); no ICS; no written action plan; poor perception of severity',
+            'Psychosocial problems, illicit drugs; cardiovascular or psychiatric comorbidity',
           ] },
         ],
       },
       {
-        id: 'fu', title: 'Complications and follow-up',
+        id: 'severe', title: '7  Difficult-to-treat and severe asthma',
+        blocks: [
+          { table: { head: ['Term', 'Definition (TAC)'], rows: [
+            ['Difficult-to-treat asthma', 'Not controlled on step 4 (medium-high dose ICS/LABA plus other controllers). Includes severe asthma and patients whose contributory factors have not yet been reviewed and corrected'],
+            ['Severe asthma', 'Still hard to control after: confirming the diagnosis, checking adherence, checking inhaler technique, avoiding triggers, and diagnosing and treating comorbidities. Consider specialist consultation or referral'],
+          ] } },
+          { tree: DTT_TREE },
+          { p: 'In Thailand 44.7% of patients are not controlled despite an ICS-containing regimen, and most severe asthma is type 2 high with raised blood eosinophils.' },
+          { sub: 'Type 2 high severe asthma: any one of' },
+          { ul: [
+            'Blood eosinophils >= 150/uL',
+            'Positive skin prick test or serum specific IgE to an aeroallergen',
+            'FeNO >= 20 ppb or sputum eosinophils >= 2%',
+          ] },
+          { table: { head: ['Add-on for type 2 severe asthma', 'Action', 'Add-on for non-type 2 severe asthma', 'Action'], rows: [
+            ['Omalizumab', 'Anti-IgE', 'Tiotropium / umeclidinium', 'LAMA'],
+            ['Mepolizumab, reslizumab', 'Anti-IL5', 'Low-dose macrolide', 'Immunomodulation'],
+            ['Benralizumab', 'Anti-IL5R', 'Bronchial thermoplasty', 'Reduces airway smooth muscle'],
+            ['Dupilumab', 'Anti-IL4R alpha', 'Non-type 2 biologic (tezepelumab)', 'Non-type 2 pathway'],
+            ['Tezepelumab', 'Anti-TSLP', '', ''],
+          ] } },
+          { note: 'Bronchial thermoplasty is also considered in type 2 severe asthma that cannot receive a biologic.' },
+          { sub: 'Choosing a biologic' },
+          { tree: BIO_TREE },
+          { sub: 'Biologic summary' },
+          { table: { head: ['', 'Omalizumab', 'Mepolizumab', 'Benralizumab', 'Dupilumab', 'Tezepelumab', 'Bronchial thermoplasty'], rows: [
+            ['Mechanism', 'Anti-IgE', 'IL-5 antagonist', 'IL-5 receptor antagonist', 'IL-4R alpha (blocks IL-4 and IL-13)', 'Anti-TSLP', 'Heat reduces airway smooth muscle'],
+            ['Formulation', '150 mg prefilled syringe', '100 mg/mL prefilled pen', '30 mg/mL prefilled syringe', '200 mg/1.14 mL, 300 mg/2 mL', '210 mg/1.91 mL', '65 C for 10 s, 50-150 activations per session'],
+            ['Dose', '1-2 vials SC by IgE level, every 4 weeks', '1 injection SC every 4 weeks', '3 doses every 4 weeks, then every 8 weeks', 'Loading 2 injections, then 1 every 2 weeks', 'SC every 4 weeks', '3 bronchoscopic sessions'],
+            ['Approved age', '>= 6', '>= 12', '>= 18', '>= 6', '>= 18', '>= 18'],
+            ['Comorbidity', 'CSU, CRSwNP', 'CRSwNP, EGPA', 'CRSwNP', 'Atopic dermatitis, CRSwNP', '-', '-'],
+          ] } },
+          { p: 'Assess response after about 4 months by control, exacerbations, OCS use and biomarkers: continue if responding (taper OCS, watch for adrenal insufficiency); switch biologic if no response.' },
+        ],
+      },
+      {
+        id: 'comorbid', title: '8  Comorbidities and special situations',
+        blocks: [
+          { table: { head: ['Condition', 'Management'], rows: [
+            ['Allergic rhinitis (86% of Thai asthma patients, AROCOT)', 'Intranasal steroid and non-sedating antihistamine; refer if severe; consider SLIT in house dust mite allergy with FEV1 >= 70%'],
+            ['Chronic rhinosinusitis', 'Intranasal steroid, saline rinse; in AERD avoid aspirin, use selective COX-2 inhibitor or paracetamol'],
+            ['Obstructive sleep apnea', 'Positive airway pressure: reduces exacerbations and improves control, lung function and quality of life'],
+            ['Obesity', 'Weight loss 5-10% improves control, lung function and quality of life; 37% of severe asthma patients are obese'],
+            ['GERD', 'Proton pump inhibitor or prokinetic'],
+            ['Depression and anxiety', 'Refer to psychiatry'],
+            ['Pregnancy', 'Keep control continuous; advise that medication benefit outweighs the risk of stopping'],
+            ['Long-term or frequent systemic steroid, or high-dose ICS', '>= 2 short OCS courses/year: give calcium and vitamin D; screen for diabetes, osteoporosis, glaucoma and HPA axis effects; refer'],
+            ['Surgery', 'Assess symptoms and lung function before; if FEV1 below target (< 80%) give prednisone 1 mg/kg/day (max 40 mg) for 5 days before surgery; if high-dose or OCS > 2 weeks in the past 6 months, give IV hydrocortisone to prevent adrenal crisis'],
+            ['Exercise-induced bronchoconstriction', 'Warm up and use bronchodilator before exercise; regular controller if symptoms persist'],
+          ] } },
+          { sub: 'Allergic rhinitis in adults' },
+          { ul: [
+            'Intermittent (< 4 days/week or < 4 weeks) with VAS < 5: saline rinse plus second-generation antihistamine or LTRA',
+            'Intermittent with VAS >= 5, or persistent: saline rinse plus intranasal steroid (INS)',
+            'Reassess at 2 weeks: if better, continue and consider stepping down; if not, review diagnosis, comorbidity and adherence, then add on (e.g. antihistamine with INS, short decongestant <= 5 days)',
+            'Not better after 2 more weeks: consider immunotherapy or surgery',
+          ] },
+          { sub: 'Chronic rhinosinusitis in adults' },
+          { ul: [
+            '2 symptoms for >= 12 weeks, one being nasal blockage or discharge, with or without facial pain and reduced smell',
+            'Initial: saline rinse, intranasal steroid, avoid triggers and unnecessary antibiotics; reassess at 6-12 weeks; CT paranasal sinus or refer if not better',
+            'Alarm symptoms (refer urgently): unilateral symptoms, bleeding, crusting; periorbital swelling, displaced globe, double vision, reduced vision; severe headache, frontal swelling, neurological signs',
+          ] },
+          { sub: 'Obstructive sleep apnea' },
+          { ul: [
+            'Suspected or at risk: sleep study, interpreted by a specialist',
+            'OSA if AHI or RDI > 15, or > 5 with symptoms: explain and offer CPAP; if declined, behaviour change, oral appliance or surgery',
+          ] },
+        ],
+      },
+      {
+        id: 'edu', title: '9  Patient education',
         blocks: [
           { ul: [
-            'Complications: fixed airflow obstruction from remodeling, pneumothorax and pneumomediastinum during attacks, respiratory failure, OCS toxicity (diabetes, osteoporosis, cataract, adrenal suppression)',
-            'Follow-up: 1-3 months after starting or changing treatment, then every 3-12 months; within 1 week after an exacerbation',
-            'Each visit: symptom control, exacerbations, inhaler technique, adherence, side effects, lung function every 1-2 years (more often if unstable), action plan',
+            'Asthma and its course',
+            'Medicines and side effects: use the controller regularly and the reliever when symptomatic',
+            'Self-management of exacerbation with a written asthma action plan',
+            'Correct inhaler technique',
+            'Treatment of comorbidities: allergic rhinitis, sinusitis, OSA, GERD, obesity',
+            'Avoid allergens, smoke and pollution: wear a mask against PM2.5 and avoid outdoor activity on poor air quality days',
           ] },
         ],
       },
