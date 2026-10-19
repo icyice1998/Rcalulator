@@ -1,198 +1,6 @@
-// Asthma: diagnosis, control and risk, treatment step, exacerbation
+// Asthma topic: diagnosis, assessment, stepwise treatment, difficult-to-treat and severe asthma, exacerbation
 (function () {
-  const UI = typeof window !== 'undefined' && window.UI ? window.UI : require('../ui.js');
-  const Tree = typeof window !== 'undefined' && window.Tree ? window.Tree : require('../tree.js');
-
-  const r1 = x => Math.round(x * 10) / 10;
-  const has = (...xs) => xs.every(x => x !== null && x !== undefined && !Number.isNaN(x));
-  const ddx = list => list.map((d, i) => `  ${i + 1}. ${d}`);
-
-  // ---------- 1. Diagnosis ----------
-
-  function diagnosis(v) {
-    const lines = [];
-    const path = new Set(['ad']);
-    const positives = [];
-
-    if (has(v.fev1Pre, v.fev1Post) && v.fev1Pre > 0) {
-      const ml = (v.fev1Post - v.fev1Pre) * 1000, pct = (v.fev1Post - v.fev1Pre) / v.fev1Pre * 100;
-      const pos = pct >= 12 && ml >= 200;
-      const strong = pct >= 15 && ml >= 400;
-      lines.push(`BDR: FEV1 +${Math.round(ml)} mL (${r1(pct)}%): ${pos ? (strong ? 'positive, high confidence (>= 15% and >= 400 mL)' : 'positive (>= 12% and >= 200 mL)') : 'negative'}`);
-      if (pos) positives.push('bronchodilator responsiveness');
-    }
-    if (has(v.pefPre, v.pefPost) && v.pefPre > 0) {
-      const pct = (v.pefPost - v.pefPre) / v.pefPre * 100;
-      lines.push(`PEF after BD +${r1(pct)}%: ${pct >= 20 ? 'positive (>= 20%)' : 'negative'}`);
-      if (pct >= 20) positives.push('PEF reversibility');
-    }
-    if (has(v.pefMax, v.pefMin) && v.pefMax + v.pefMin > 0) {
-      const dv = (v.pefMax - v.pefMin) / ((v.pefMax + v.pefMin) / 2) * 100;
-      lines.push(`Diurnal PEF variability = (max - min) / mean = ${r1(dv)}%: ${dv > 10 ? '> 10%, excessive' : '<= 10%'}`);
-      if (dv > 10) positives.push('PEF variability');
-    }
-    if (has(v.ics4Pre, v.ics4Post) && v.ics4Pre > 0) {
-      const ml = (v.ics4Post - v.ics4Pre) * 1000, pct = (v.ics4Post - v.ics4Pre) / v.ics4Pre * 100;
-      const pos = pct >= 12 && ml >= 200;
-      lines.push(`After 4 weeks ICS: FEV1 +${Math.round(ml)} mL (${r1(pct)}%): ${pos ? 'positive' : 'negative'}`);
-      if (pos) positives.push('response to ICS');
-    }
-    let challenge = null;
-    if (has(v.chFall) && v.chType) {
-      const cut = { methacholine: 20, indirect: 15, exercise: 10 }[v.chType];
-      challenge = v.chFall >= cut;
-      lines.push(`Bronchial challenge (${v.chType}): FEV1 fall ${v.chFall}%: ${challenge ? `positive (>= ${cut}%)` : 'negative'}`);
-      if (challenge) positives.push('bronchial challenge');
-    }
-
-    // Type 2 biomarkers
-    let t2 = false;
-    if (has(v.bec)) {
-      const hi = v.bec >= 150;
-      t2 = t2 || hi;
-      lines.push(`Blood eosinophils ${v.bec}/uL: ${v.bec >= 300 ? '>= 300, type 2 (biologic threshold)' : hi ? '>= 150, suggests type 2' : '< 150'}`);
-    }
-    if (has(v.feno)) {
-      const cut = { naive: 50, medium: 25, high: 20 }[v.icsStatus || 'naive'];
-      const hi = v.icsStatus === 'naive' ? v.feno > cut : v.feno >= cut;
-      t2 = t2 || hi;
-      lines.push(`FeNO ${v.feno} ppb: ${hi ? 'high' : 'not high'} (cut-off ${cut} for ${{ naive: 'ICS-naive', medium: 'medium-dose ICS', high: 'high-dose ICS' }[v.icsStatus || 'naive']})`);
-    }
-
-    let dx;
-    if (v.typical) {
-      path.add('hi'); path.add('spiroH');
-      if (positives.length && !positives.every(p => p === 'bronchial challenge')) { path.add('defLF'); dx = 'Definite asthma (lung function confirmed)'; }
-      else if (challenge) { path.add('notconf'); path.add('bc'); dx = 'Definite asthma (bronchial challenge confirmed)'; }
-      else if (t2) { path.add('notconf'); path.add('bio'); dx = 'Biomarker-supported asthma'; }
-      else if (lines.length) { path.add('notconf'); dx = 'Not yet confirmed: repeat during symptoms, add biomarkers or bronchial challenge'; }
-      else dx = 'Enter lung function or biomarker results';
-    } else {
-      path.add('lo'); path.add('spiroL');
-      if (positives.length) { path.add('chal'); path.add('possible'); dx = 'Possible asthma: variable airflow present, exclude alternative diagnoses'; }
-      else if (challenge === false) { path.add('chal'); path.add('noasthma'); dx = 'Asthma unlikely: look for alternative diagnosis'; }
-      else dx = 'Low pre-test likelihood: spirometry with BDR, then bronchial challenge';
-    }
-    if (challenge === false && v.typical)
-      lines.push('Negative challenge with typical history: out of season, remote occupational exposure, recent steroid, or mimic (VCD, central airway obstruction)');
-    if (positives.length) lines.push(`Variable expiratory airflow confirmed by: ${positives.join(', ')}`);
-    return { dx, lines, path, t2 };
-  }
-
-  // ---------- 2. Control and risk ----------
-
-  const CONTROL = [
-    ['cDay', 'Daytime symptoms > 2 times/week'],
-    ['cNight', 'Any night waking due to asthma'],
-    ['cRel', 'Reliever needed > 2 times/week'],
-    ['cAct', 'Any activity limitation due to asthma'],
-  ];
-  const RISKS = [
-    ['rSaba', 'High SABA use (>= 3 canisters/year)'],
-    ['rNoIcs', 'No ICS'],
-    ['rExac', '>= 1 severe exacerbation in last year'],
-    ['rIcu', 'Ever intubated or ICU for asthma'],
-    ['rAdh', 'Poor adherence or inhaler technique'],
-    ['rCom', 'Obesity, rhinosinusitis, GERD, food allergy, pregnancy'],
-    ['rExp', 'Smoking, e-cigarette, allergen, pollution'],
-    ['rPsy', 'Psychological or socioeconomic problems'],
-    ['rFev', 'FEV1 < 60% predicted'],
-    ['rT2', 'High BEC or FeNO'],
-  ];
-
-  function control(v) {
-    const n = CONTROL.filter(([id]) => v[id]).length;
-    const level = n === 0 ? 'Well controlled' : n <= 2 ? 'Partly controlled' : 'Uncontrolled';
-    const risks = RISKS.filter(([id]) => v[id]).map(([, l]) => l);
-    const lines = [`Symptom control (past 4 weeks): ${n} of 4 -> ${level}`];
-    lines.push(risks.length ? `Exacerbation risk increased (${risks.length} factor${risks.length > 1 ? 's' : ''}): ${risks.join('; ')}` : 'No exacerbation risk factor marked');
-    return { level, n, risks, lines };
-  }
-
-  // ---------- 3. Treatment step (GINA adults and adolescents) ----------
-
-  const STEPS = {
-    1: { t1: 'As-needed low-dose ICS-formoterol (AIR-only)', t2: 'Take ICS whenever SABA is taken (ICS + SABA)' },
-    2: { t1: 'As-needed low-dose ICS-formoterol (AIR-only)', t2: 'Low-dose maintenance ICS + as-needed SABA' },
-    3: { t1: 'Low-dose ICS-formoterol maintenance and reliever (MART)', t2: 'Low-dose ICS-LABA + as-needed SABA or ICS-SABA' },
-    4: { t1: 'Medium-dose ICS-formoterol MART', t2: 'Medium-dose ICS-LABA + as-needed SABA or ICS-SABA' },
-    5: { t1: 'Add-on LAMA; refer for phenotype; consider high-dose ICS-formoterol; biologic (anti-IgE, anti-IL5/5R, anti-IL4Ra, anti-TSLP)',
-      t2: 'Add-on LAMA; refer for phenotype; consider high-dose ICS-LABA; biologic' },
-  };
-
-  function treatment(v, ctl) {
-    const lines = [];
-    let step;
-    if (v.current) {
-      const cur = Number(v.current);
-      if (ctl.level === 'Well controlled') {
-        step = cur;
-        lines.push(`On step ${cur}, well controlled: continue; consider step down after 3 months of good control`);
-      } else {
-        step = Math.min(5, cur + 1);
-        lines.push(`On step ${cur}, ${ctl.level.toLowerCase()}: check inhaler technique, adherence, comorbidities and triggers first, then step up to ${step}`);
-      }
-      const sev = cur <= 2 ? 'mild' : cur === 3 ? 'moderate' : 'severe (if uncontrolled on optimized step 4-5: assess as difficult-to-treat or severe asthma)';
-      if (ctl.level === 'Well controlled') lines.push(`Severity (controlled on step ${cur}): ${sev}`);
-    } else {
-      step = { mild: 2, most: 3, daily: 4 }[v.start];
-      lines.push({ mild: 'Symptoms < 3-5 days/week with normal or mildly reduced lung function: start step 1-2',
-        most: 'Symptoms most days, or waking >= 1/week, or low lung function: start step 3',
-        daily: 'Daily symptoms or waking >= 1/week with low lung function or recent exacerbation: start step 4; short OCS course may be needed' }[v.start]);
-    }
-    lines.push(`Track 1 (preferred, reliever ICS-formoterol): ${STEPS[step].t1}`);
-    lines.push(`Track 2 (alternative): ${STEPS[step].t2}`);
-    lines.push('All patients: written action plan, inhaler technique, adherence, treat modifiable risks; review in 1-3 months');
-    return { step, lines };
-  }
-
-  // ---------- 4. Exacerbation ----------
-
-  function exacerbation(v) {
-    const path = new Set(['ex']);
-    const lines = [];
-    const severe = [];
-    if (v.talk === 'words') severe.push('talks in words');
-    if (v.hunched) severe.push('sits hunched / agitated / accessory muscles');
-    if (has(v.rr) && v.rr > 30) severe.push(`RR ${v.rr} > 30`);
-    if (has(v.hr) && v.hr > 120) severe.push(`HR ${v.hr} > 120`);
-    if (has(v.spo2) && v.spo2 < 90) severe.push(`SpO2 ${v.spo2}% < 90`);
-    if (has(v.pefEx) && v.pefEx <= 50) severe.push(`PEF ${v.pefEx}% <= 50`);
-
-    let level;
-    if (v.altered) {
-      level = 'Life-threatening';
-      path.add('lt');
-      lines.push('Drowsy, confused or silent chest: consult ICU, start SABA and O2, prepare for intubation');
-    } else if (severe.length) {
-      level = 'Severe';
-      path.add('sev');
-      lines.push(`Severe by worst feature: ${severe.join(', ')}`);
-      lines.push('Treat: SABA + ipratropium, controlled O2 to SpO2 93-95%, oral or IV corticosteroid,',
-        '  consider IV magnesium sulfate 2 g over 20 min, consider high-dose ICS; transfer to acute care');
-    } else {
-      level = 'Mild to moderate';
-      path.add('mm');
-      lines.push('Talks in phrases, RR raised but <= 30, HR 100-120, SpO2 90-95%, PEF > 50%');
-      lines.push('Treat: SABA (e.g. salbutamol 4-10 puffs by pMDI and spacer every 20 min for 1 h), consider ipratropium,',
-        '  controlled O2 to SpO2 93-95%, oral prednisolone 40-50 mg');
-    }
-    if (has(v.pef1h)) {
-      path.add('reass');
-      if (v.pef1h >= 60) {
-        path.add('disch');
-        lines.push(`1 h after treatment PEF ${v.pef1h}%: ${v.pef1h > 80 ? '> 80%, good response' : '60-80%, moderate'}: plan discharge if symptoms improved`);
-      } else {
-        path.add('cont');
-        lines.push(`1 h after treatment PEF ${v.pef1h}% < 60%: severe, continue treatment and reassess frequently; consider ICU if deteriorating`);
-      }
-    }
-    lines.push('Discharge: prednisolone 40-50 mg/day for 5-7 days; start or step up ICS for 2-4 weeks; review technique,',
-      '  give written action plan; follow up within 2-7 days');
-    return { level, lines, path };
-  }
-
-  // ---------- trees and tables ----------
+  const Topic = typeof window !== 'undefined' && window.Topic ? window.Topic : require('../topic.js');
 
   const DX_TREE = {
     id: 'ad', text: 'Chronic or recurrent respiratory symptoms', note: 'Wheeze, dyspnea, chest tightness, cough varying over time',
@@ -229,11 +37,47 @@
     ],
   };
 
+  const DTT_TREE = {
+    id: 'u', text: 'Uncontrolled on GINA step 4-5', note: 'Symptoms or exacerbations despite medium- or high-dose ICS-LABA',
+    children: [{
+      id: 'dx', text: 'Confirm the diagnosis', note: 'Variable airflow, BHR, airway inflammation (FeNO, BEC, sputum)',
+      children: [
+        { id: 'alt', edge: 'Not confirmed', text: 'Consider alternative diagnosis', note: 'VCD / ILO, COPD, bronchiectasis, HF' },
+        {
+          id: 'adh', edge: 'Confirmed', text: 'Check inhaler technique and adherence', note: 'History, dose counter, pharmacy refill',
+          children: [
+            { id: 'fix', edge: 'Poor', text: 'Educate, correct, review in 3-6 months' },
+            {
+              id: 'com', edge: 'Satisfactory', text: 'Treat comorbidities and risk factors',
+              note: 'CRS / nasal polyps, obesity, GERD, OSA, ILO, anxiety-depression, smoking, allergen, EGPA, ABPA',
+              children: [
+                { id: 'ctl', edge: 'Controlled', text: 'Difficult-to-treat asthma', note: 'Step down slowly' },
+                {
+                  id: 'sev', edge: 'Still uncontrolled', text: 'Severe asthma', note: 'Refer; assess phenotype',
+                  children: [
+                    {
+                      id: 't2', edge: 'BEC >= 150, FeNO >= 20, allergen-driven or OCS-dependent', text: 'Type 2 high',
+                      note: 'Biologic by phenotype; add-on LAMA',
+                    },
+                    {
+                      id: 'nont2', edge: 'No type 2 marker', text: 'Type 2 low',
+                      note: 'Add-on LAMA, azithromycin, anti-TSLP; repeat biomarkers on lowest OCS',
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }],
+  };
+
   const EX_TREE = {
     id: 'ex', text: 'Asthma exacerbation', note: 'Assess ABC, triage by worst feature',
     children: [
       { id: 'lt', edge: 'Drowsy, confused, silent chest', text: 'Life-threatening', note: 'ICU, SABA, O2, prepare intubation' },
-      { id: 'sev', edge: 'Words, RR > 30, HR > 120, SpO2 < 90, PEF <= 50%', text: 'Severe', note: 'SABA + ipratropium, O2, steroid, IV Mg' },
+      { id: 'sv', edge: 'Words, RR > 30, HR > 120, SpO2 < 90, PEF <= 50%', text: 'Severe', note: 'SABA + ipratropium, O2, steroid, IV Mg' },
       { id: 'mm', edge: 'Phrases, HR 100-120, SpO2 90-95, PEF > 50%', text: 'Mild to moderate', note: 'SABA, O2, oral steroid' },
       {
         id: 'reass', edge: '1 h after treatment', text: 'FEV1 or PEF',
@@ -245,163 +89,227 @@
     ],
   };
 
-  const DDX_TABLE = [
-    { group: 'Upper airway' },
-    ['Foreign body, postnasal drip', 'Localized or upper airway symptoms', 'Vocal cord dysfunction, upper airway obstruction, tracheobronchomalacia'],
-    { group: 'Pulmonary' },
-    ['COPD, bronchiectasis', 'Fixed obstruction, sputum', 'ABPA, EGPA, cystic fibrosis, ILD, lung cancer, pneumonia, pneumothorax, sarcoidosis'],
-    { group: 'Cardiac' },
-    ['Left ventricular failure', 'Orthopnea, edema', 'Angina, mitral valve disease'],
-    { group: 'Other' },
-    ['GERD, obesity', 'Non-variable symptoms', 'Anemia, carcinoid, hyperventilation, mastocytosis, functional'],
-  ];
+  const TOPIC = {
+    title: 'Asthma',
+    subtitle: 'Chest',
+    lead: 'A heterogeneous disease with chronic airway inflammation, defined by variable respiratory symptoms (wheeze, dyspnea, chest tightness, cough) together with variable expiratory airflow limitation.',
+    sections: [
+      {
+        id: 'patho', title: 'Pathophysiology',
+        blocks: [
+          { ul: [
+            'Airway inflammation: mast cells, eosinophils, Th2 lymphocytes, IgE, leukotrienes; neutrophils in some phenotypes',
+            'Airway hyperresponsiveness: exaggerated bronchoconstriction to triggers',
+            'Remodeling from chronic injury-repair: smooth muscle hypertrophy, goblet cell metaplasia, collagen deposition, mucus hypersecretion; can lead to fixed obstruction',
+            'Endotypes: type 2 high (allergic, eosinophilic; steroid responsive) and type 2 low (neutrophilic or paucigranulocytic; obesity, smoking)',
+          ] },
+        ],
+      },
+      {
+        id: 'clinical', title: 'Clinical features',
+        blocks: [
+          { sub: 'Symptoms that support asthma' },
+          { ul: [
+            'More than one of wheeze, shortness of breath, chest tightness, cough',
+            'Vary over time and in intensity; often worse at night or on waking',
+            'Triggered by exercise, laughter, allergens, cold air; worsening after exercise ends is very distinctive',
+            'Appear or worsen with viral infections',
+          ] },
+          { sub: 'Risk factors and triggers' },
+          { table: { head: ['Endogenous', 'Environmental', 'Triggers'], rows: [
+            ['Atopy, airway hyperresponsiveness', 'Indoor and outdoor allergens', 'House dust mite, animal dander, cockroach, pollen, fungi'],
+            ['Genetics, sex, ethnicity', 'Occupational sensitizers', 'Drugs: aspirin, NSAIDs, beta-blockers, ACE inhibitors'],
+            ['', 'Obesity, early viral infection, tobacco smoke', 'Exercise, cold air, emotion, irritants, pollution, infection'],
+          ] } },
+          { sub: 'Examination' },
+          { ul: [
+            'Chest: wheeze on normal breathing or prolonged expiration; often normal between episodes',
+            'Upper airway: rhinitis, nasal polyps',
+            'Skin: eczema, urticaria, atopic dermatitis',
+          ] },
+        ],
+      },
+      {
+        id: 'diagnosis', title: 'Diagnostic criteria (GINA)',
+        blocks: [
+          { p: 'Diagnosis needs both a history of variable respiratory symptoms and confirmed variable expiratory airflow. Airflow limitation need not be present at the time of testing; test during symptoms or in the morning when possible, and before starting ICS.' },
+          { table: { head: ['Test (adults)', 'Positive result'], rows: [
+            ['Bronchodilator responsiveness', 'FEV1 or FVC increase >= 12% and >= 200 mL (more confident if >= 15% and >= 400 mL) 10-15 min after salbutamol 200-400 mcg; or PEF increase >= 20%'],
+            ['PEF variability', 'Average daily diurnal variability > 10% over 2 weeks; variability = (max - min) / mean x 100'],
+            ['Trial of ICS', 'FEV1 increase >= 12% and >= 200 mL (or PEF >= 20%) after 4 weeks of ICS-containing treatment'],
+            ['Bronchial challenge', 'FEV1 fall >= 20% with methacholine; >= 15% with mannitol, hypertonic saline or hyperventilation; > 10% and > 200 mL with exercise'],
+            ['Variation between visits', 'FEV1 change >= 12% and >= 200 mL (or PEF >= 20%); specific but not sensitive'],
+          ] } },
+          { note: 'Bronchial challenge contraindications (SMUK): severe airflow limitation (FEV1 < 50% or < 1 L), MI or stroke within 3 months, uncontrolled hypertension, known aortic aneurysm. A negative challenge may be false if tested out of season, long after occupational exposure, or on recent steroid.' },
+          { sub: 'Levels of diagnostic certainty' },
+          { tree: DX_TREE },
+          { sub: 'Type 2 biomarkers' },
+          { table: { head: ['Biomarker', 'High', 'Higher in', 'Lower in'], rows: [
+            ['Blood eosinophils', '>= upper limit of normal; on high-dose ICS >= 150/uL suggests type 2, >= 300/uL common biologic threshold',
+              'Men, morning, smokers, parasites, allergy, EGPA', 'OCS, inhaled or nasal steroid'],
+            ['FeNO', 'ICS-naive > 50 ppb; medium-dose ICS >= 25 ppb; high-dose ICS >= 20 ppb',
+              'Men, afternoon, atopic dermatitis, allergic rhinitis, after allergen', 'Smokers, bronchoconstriction, ICS or OCS'],
+          ] } },
+          { note: 'Raised FeNO or eosinophils support type 2 asthma in a patient with typical symptoms; low values do not exclude asthma.' },
+        ],
+      },
+      {
+        id: 'ddx', title: 'Differential diagnosis',
+        blocks: [
+          { table: { head: ['Group', 'Conditions'], rows: [
+            ['Upper airway', 'Foreign body, postnasal drip, upper airway obstruction, vocal cord dysfunction (inducible laryngeal obstruction), tracheobronchomalacia'],
+            ['Pulmonary', 'COPD, bronchiectasis, ABPA, EGPA, cystic fibrosis, ILD, lung cancer, pneumonia, pneumothorax, sarcoidosis'],
+            ['Cardiac', 'Left ventricular failure, mitral valve disease, angina'],
+            ['Other', 'GERD, obesity, anemia, hyperventilation, carcinoid, mastocytosis, functional'],
+          ] } },
+          { sub: 'Asthma vs COPD' },
+          { table: { head: ['Feature', 'Asthma', 'COPD'], rows: [
+            ['Onset', 'Childhood or early adulthood', 'Usually > 40 years, smoking, biomass, post-TB'],
+            ['Reversibility', 'Largely reversible', 'Partially reversible, progressive'],
+            ['Inflammation', 'Type 2 eosinophilic', 'Neutrophilic'],
+            ['Associations', 'Allergy, eczema, rhinitis', 'Chronic bronchitis, emphysema'],
+            ['Lung function', 'May be normal between episodes', 'Persistently obstructive, declines'],
+            ['Symptoms', 'Variable, night or early morning', 'Persistent, exertional'],
+            ['ICS response', 'Good', 'Inconsistent'],
+          ] } },
+        ],
+      },
+      {
+        id: 'assess', title: 'Assessment of control and risk',
+        blocks: [
+          { table: { head: ['In the past 4 weeks', 'Well controlled', 'Partly controlled', 'Uncontrolled'], rows: [
+            ['Daytime symptoms > 2/week; any night waking; reliever > 2/week; any activity limitation', 'None of these', '1-2 of these', '3-4 of these'],
+          ] } },
+          { sub: 'Risk factors for exacerbation (any one increases risk)' },
+          { ul: [
+            'High SABA use (>= 3 canisters/year; mortality rises with > 1 canister/month); no ICS; poor adherence or technique',
+            '>= 1 severe exacerbation in the last year; ever intubated or ICU for asthma',
+            'FEV1 < 60% predicted, high bronchodilator responsiveness, raised eosinophils or FeNO',
+            'Obesity, chronic rhinosinusitis, GERD, food allergy, pregnancy; smoking, e-cigarettes, allergen or pollution exposure',
+            'Major psychological or socioeconomic problems',
+          ] },
+          { note: 'Persistent airflow limitation risk: no ICS after severe exacerbation, smoke or occupational exposure, low initial FEV1, sputum or blood eosinophilia. Medication side-effect risk: frequent OCS, high-dose or potent ICS, P450 inhibitors.' },
+        ],
+      },
+      {
+        id: 'treat', title: 'Stepwise treatment (GINA, adults and adolescents)',
+        blocks: [
+          { table: { head: ['Step', 'Track 1 (preferred): reliever ICS-formoterol', 'Track 2 (alternative): reliever SABA or ICS-SABA'], rows: [
+            ['1', 'As-needed low-dose ICS-formoterol (AIR-only)', 'Take ICS whenever SABA is taken'],
+            ['2', 'As-needed low-dose ICS-formoterol (AIR-only)', 'Low-dose maintenance ICS'],
+            ['3', 'Low-dose ICS-formoterol maintenance and reliever (MART)', 'Low-dose ICS-LABA'],
+            ['4', 'Medium-dose ICS-formoterol MART', 'Medium-dose ICS-LABA'],
+            ['5', 'Add-on LAMA; refer for phenotype; consider high-dose ICS-formoterol; biologic', 'Add-on LAMA; refer; high-dose ICS-LABA; biologic'],
+          ] } },
+          { sub: 'Starting treatment' },
+          { table: { head: ['Presentation', 'Start at'], rows: [
+            ['Symptoms < 3-5 days/week, normal or mildly reduced lung function', 'Step 1-2'],
+            ['Symptoms most days, or night waking >= 1/week, or low lung function', 'Step 3'],
+            ['Daily symptoms or night waking >= 1/week with low lung function or recent exacerbation', 'Step 4 (short OCS course may be needed)'],
+          ] } },
+          { p: 'Avoid SABA-only treatment: apparently mild asthma still accounts for 30-37% of acute asthma and 15-27% of asthma deaths. Review 1-3 months after any change; before stepping up, check inhaler technique, adherence, comorbidities and triggers. Step down after 3 months of good control.' },
+          { sub: 'ICS daily dose (mcg)' },
+          { table: { head: ['Inhaled corticosteroid', 'Low', 'Medium', 'High'], rows: [
+            ['Beclometasone dipropionate (HFA)', '100-200', '> 200-400', '> 400'],
+            ['Budesonide (DPI)', '200-400', '> 400-800', '> 800'],
+            ['Ciclesonide (HFA)', '80-160', '> 160-320', '> 320'],
+            ['Fluticasone furoate (DPI)', '100', '-', '200'],
+            ['Fluticasone propionate (DPI or HFA)', '100-250', '> 250-500', '> 500'],
+            ['Mometasone furoate', '110-220', '> 220-440', '> 440'],
+          ] } },
+          { sub: 'Bronchodilators' },
+          { table: { head: ['Drug', 'Onset', 'Duration', 'Usual dose'], rows: [
+            ['Salbutamol (SABA)', '< 5 min', '3-6 h', '100-200 mcg as needed'],
+            ['Formoterol (LABA)', '~7 min', '12 h', '12-24 mcg twice daily; reliever with budesonide in MART'],
+            ['Salmeterol (LABA)', '~15 min', '12 h', '50 mcg twice daily'],
+            ['Vilanterol, indacaterol', '~5 min', '24 h', 'Once daily (with ICS)'],
+            ['Tiotropium (LAMA)', 'Slow', '24 h', 'Add-on at step 5 (soft mist 2.5 mcg x 2 puffs daily)'],
+          ] } },
+          { note: 'Side effects: ICS - dysphonia, oral candidiasis (rinse mouth), skin bruising, cataract and osteoporosis at high dose; beta-agonist - tremor, tachycardia, hypokalemia; LAMA - dry mouth, urinary retention.' },
+        ],
+      },
+      {
+        id: 'dtt', title: 'Difficult-to-treat and severe asthma',
+        blocks: [
+          { table: { head: ['Term', 'Definition'], rows: [
+            ['Uncontrolled asthma', 'Poor symptom control and/or frequent exacerbations; may be mild asthma that is not being treated properly'],
+            ['Difficult-to-treat asthma', 'Uncontrolled despite medium- or high-dose ICS-LABA (or maintenance OCS), or needs high-dose treatment to stay controlled. Often due to wrong diagnosis, poor technique or adherence, comorbidities, SABA overuse'],
+            ['Severe asthma', 'Uncontrolled despite adherence to maximal optimized high-dose ICS-LABA and treatment of contributory factors, or worsens when high-dose treatment is reduced. A retrospective label'],
+          ] } },
+          { note: 'Severity by treatment needed once controlled for several months: mild = step 1-2, moderate = step 3, severe = step 4-5 still needed or still uncontrolled.' },
+          { sub: 'Approach' },
+          { tree: DTT_TREE },
+          { sub: 'Contributory factors to correct before labelling severe' },
+          { table: { head: ['Factor', 'What to do'], rows: [
+            ['Incorrect diagnosis', 'Repeat spirometry with BDR, PEF monitoring, challenge; look for VCD/ILO, COPD, bronchiectasis, HF'],
+            ['Inhaler technique', 'Watch the patient use the device; switch device if needed'],
+            ['Adherence', 'Ask non-judgmentally, check dose counter and refills; simplify regimen (MART)'],
+            ['Comorbidities', 'Chronic rhinosinusitis and nasal polyps, obesity, GERD, OSA, anxiety and depression, ILO, ABPA, EGPA'],
+            ['Exposures', 'Smoking, vaping, allergens, occupational agents; NSAID, beta-blocker'],
+            ['SABA overuse', 'Switch to ICS-formoterol reliever'],
+          ] } },
+          { sub: 'Biologics for severe type 2 asthma' },
+          { table: { head: ['Target', 'Drug and dose', 'Choose when', 'Watch for'], rows: [
+            ['Anti-IgE', 'Omalizumab SC every 2-4 weeks, dose by IgE and weight', 'Allergic: sensitized to perennial allergen, total IgE in dosing range, exacerbations', 'Anaphylaxis (rare), injection site'],
+            ['Anti-IL5 / IL5R', 'Mepolizumab 100 mg SC every 4 weeks; benralizumab 30 mg SC every 4 weeks x 3 then every 8 weeks', 'Eosinophilic: BEC >= 150-300/uL, exacerbations, OCS-dependent, nasal polyps', 'Headache, injection site; check helminths'],
+            ['Anti-IL4R alpha', 'Dupilumab 400-600 mg SC load, then 200-300 mg every 2 weeks', 'BEC >= 150 or FeNO >= 25 ppb, OCS-dependent, atopic dermatitis, polyps', 'Transient eosinophilia, conjunctivitis'],
+            ['Anti-TSLP', 'Tezepelumab 210 mg SC every 4 weeks', 'Severe asthma regardless of type 2 markers', 'Pharyngitis, injection site'],
+          ] } },
+          { p: 'Review response after about 4 months. Complete response: continue, taper OCS then ICS (watch for adrenal insufficiency), follow every 3-6 months. Partial response: continue 6-9 more months or switch biologic. No response: stop, re-check contributory factors, switch to another biologic.' },
+          { note: 'Type 2 low options: add-on LAMA, azithromycin 250-500 mg three times weekly (check QTc and sputum for NTM), anti-TSLP, treat obesity; bronchial thermoplasty only in selected centres.' },
+          { sub: 'Special groups' },
+          { table: { head: ['Group', 'Key points'], rows: [
+            ['Obesity', 'Lower lung function, more comorbidity (GERD, OSA, depression), weaker ICS response; weight loss improves control'],
+            ['ABPA', 'Central bronchiectasis, fleeting infiltrates, finger-in-glove, high total IgE and Aspergillus-specific IgE; treat with OCS and/or itraconazole'],
+            ['Exercise-induced', 'Bronchoconstriction peaks 10-15 min after starting exercise, resolves by 60 min; SABA or ICS-formoterol 10 min before exercise; daily ICS if frequent'],
+            ['Work-related', 'Better on weekends and holidays; serial PEF at and away from work; remove exposure'],
+            ['Pregnancy', 'One third improve, one third worsen, one third unchanged; continue ICS; uncontrolled asthma is riskier than treatment'],
+          ] } },
+        ],
+      },
+      {
+        id: 'exac', title: 'Exacerbation',
+        blocks: [
+          { p: 'A progressive increase in shortness of breath, cough, wheeze or chest tightness with a fall in lung function from the patient\'s usual status. Common triggers: viral infection, allergen, pollution, poor ICS adherence.' },
+          { tree: EX_TREE },
+          { table: { head: ['Severity', 'Features (worst feature decides)', 'Treatment'], rows: [
+            ['Mild to moderate', 'Talks in phrases, prefers sitting, not agitated, RR raised, HR 100-120, SpO2 90-95%, PEF > 50%',
+              'Salbutamol 4-10 puffs by pMDI and spacer every 20 min for 1 h; consider ipratropium; O2 to SpO2 93-95%; prednisolone 40-50 mg'],
+            ['Severe', 'Talks in words, hunched, agitated, RR > 30, accessory muscles, HR > 120, SpO2 < 90%, PEF <= 50%',
+              'SABA + ipratropium, O2 93-95%, oral or IV corticosteroid, consider IV magnesium sulfate 2 g over 20 min, consider high-dose ICS'],
+            ['Life-threatening', 'Drowsy, confused, silent chest', 'ICU, SABA and O2, prepare for intubation'],
+          ] } },
+          { sub: 'Risk factors for asthma-related death' },
+          { ul: [
+            'Previous intubation or ICU; >= 2 admissions or >= 3 ED visits in the past year; admission or ED visit in the past month',
+            'Using > 2 SABA canisters per month; poor perception of severity; no written action plan',
+            'Low socioeconomic status, illicit drugs, psychosocial problems; cardiovascular, chronic lung or psychiatric disease',
+          ] },
+          { sub: 'Discharge' },
+          { ul: [
+            'Good response: no tachypnea, minimal wheeze, able to speak, PEF > 80% (60-80% may be discharged with close follow-up), SpO2 > 94% on room air',
+            'Prednisolone 40-50 mg/day for 5-7 days',
+            'Start ICS if not already on it; step up ICS for 2-4 weeks; move reliever back to as-needed',
+            'Review triggers and inhaler technique, give a written action plan; follow up within 2-7 days',
+          ] },
+        ],
+      },
+      {
+        id: 'fu', title: 'Complications and follow-up',
+        blocks: [
+          { ul: [
+            'Complications: fixed airflow obstruction from remodeling, pneumothorax and pneumomediastinum during attacks, respiratory failure, OCS toxicity (diabetes, osteoporosis, cataract, adrenal suppression)',
+            'Follow-up: 1-3 months after starting or changing treatment, then every 3-12 months; within 1 week after an exacerbation',
+            'Each visit: symptom control, exacerbations, inhaler technique, adherence, side effects, lung function every 1-2 years (more often if unstable), action plan',
+          ] },
+        ],
+      },
+    ],
+  };
 
-  const ICS_DOSE = [
-    ['Beclometasone dipropionate (HFA)', '100-200', '> 200-400', '> 400'],
-    ['Budesonide (DPI)', '200-400', '> 400-800', '> 800'],
-    ['Ciclesonide (HFA)', '80-160', '> 160-320', '> 320'],
-    ['Fluticasone furoate (DPI)', '100', '-', '200'],
-    ['Fluticasone propionate (DPI or HFA)', '100-250', '> 250-500', '> 500'],
-    ['Mometasone furoate', '110-220', '> 220-440', '> 440'],
-  ];
+  function render(el) { Topic.render(el, TOPIC); }
 
-  const VS_COPD = [
-    ['Onset', 'Childhood or early adulthood', 'Usually > 40 years, smoking'],
-    ['Reversibility', 'Largely reversible', 'Partially reversible, progressive'],
-    ['Inflammation', 'Type 2 eosinophilic', 'Neutrophilic'],
-    ['Associations', 'Allergy, eczema, rhinitis', 'Chronic bronchitis, emphysema'],
-    ['Lung function', 'May be normal between episodes', 'Persistently obstructive, declines'],
-    ['Symptoms', 'Worse at night or early morning', 'Persistent, exertional'],
-    ['ICS response', 'Good', 'Inconsistent'],
-  ];
-
-  // ---------- UI ----------
-
-  const box = (id, label, unit, step) => UI.fieldHtml({ id, label, unit, step: step || '1' });
-  const checks = list => `<div class="check-row">${list.map(([id, l]) =>
-    `<label for="${id}"><input type="checkbox" id="${id}"> ${l}</label>`).join('')}</div>`;
-  const resultBox = (id, title) => `<div class="step flagged" id="${id}"><h4>${title}</h4><pre></pre></div>`;
-
-  function render(el) {
-    const t = (head, rows) => Tree.table(head, rows);
-    el.innerHTML = `
-      <div class="page-grid">
-        <div class="card">
-          <h2>Asthma</h2>
-          <p class="muted">Chest</p>
-          <p>Heterogeneous disease with chronic airway inflammation, defined by variable respiratory symptoms
-            (wheeze, dyspnea, chest tightness, cough) together with variable expiratory airflow limitation.</p>
-          <p class="muted small">Work through the four sections in order. Each updates as you type.</p>
-        </div>
-
-        <div class="abg-grid">
-          <form class="card" id="asDx">
-            <h3 class="section-title">1  Diagnosis</h3>
-            ${checks([['typical', 'Typical variable symptoms with supportive history']])}
-            <fieldset><legend>Reversibility</legend><div class="form-grid">
-              ${box('fev1Pre', 'FEV1 pre', 'L', '0.01')}${box('fev1Post', 'FEV1 post', 'L', '0.01')}
-              ${box('pefPre', 'PEF pre', 'L/min')}${box('pefPost', 'PEF post', 'L/min')}</div></fieldset>
-            <fieldset><legend>Variability</legend><div class="form-grid">
-              ${box('pefMax', 'PEF highest (2 weeks)', 'L/min')}${box('pefMin', 'PEF lowest', 'L/min')}
-              ${box('ics4Pre', 'FEV1 before ICS', 'L', '0.01')}${box('ics4Post', 'FEV1 after 4 weeks ICS', 'L', '0.01')}</div></fieldset>
-            <fieldset><legend>Challenge and type 2 biomarkers</legend><div class="form-grid">
-              ${UI.fieldHtml({ id: 'chType', label: 'Challenge', type: 'select', options: [['', 'Not done'], ['methacholine', 'Methacholine'], ['indirect', 'Mannitol / saline / hyperventilation'], ['exercise', 'Exercise']] })}
-              ${box('chFall', 'FEV1 fall', '%')}
-              ${box('bec', 'Blood eosinophils', '/uL')}${box('feno', 'FeNO', 'ppb')}
-              ${UI.fieldHtml({ id: 'icsStatus', label: 'Current ICS', type: 'select', options: [['naive', 'ICS-naive'], ['medium', 'Medium dose'], ['high', 'High dose']] })}
-            </div></fieldset>
-          </form>
-          <div class="card result">${resultBox('asDxOut', 'Diagnosis')}</div>
-        </div>
-
-        <div class="abg-grid">
-          <form class="card" id="asCtl">
-            <h3 class="section-title">2  Control and risk</h3>
-            <fieldset><legend>In the past 4 weeks</legend>${checks(CONTROL)}</fieldset>
-            <fieldset><legend>Risk factors for exacerbation</legend>${checks(RISKS)}</fieldset>
-            <h3 class="section-title">3  Treatment step</h3>
-            <div class="form-grid">
-              ${UI.fieldHtml({ id: 'current', label: 'Current GINA step', type: 'select', options: [['', 'Not on treatment'], ['1', 'Step 1'], ['2', 'Step 2'], ['3', 'Step 3'], ['4', 'Step 4'], ['5', 'Step 5']] })}
-              ${UI.fieldHtml({ id: 'start', label: 'If starting: presentation', type: 'select', options: [['mild', 'Symptoms < 3-5 days/week'], ['most', 'Most days or night waking or low LF'], ['daily', 'Daily + low LF or recent exacerbation']] })}
-            </div>
-          </form>
-          <div class="card result">${resultBox('asCtlOut', 'Control and risk')}${resultBox('asTxOut', 'Treatment step')}</div>
-        </div>
-
-        <div class="abg-grid">
-          <form class="card" id="asEx">
-            <h3 class="section-title">4  Exacerbation</h3>
-            ${checks([['altered', 'Drowsy, confused or silent chest'], ['hunched', 'Hunched, agitated or accessory muscles']])}
-            <div class="form-grid">
-              ${UI.fieldHtml({ id: 'talk', label: 'Talks in', type: 'select', options: [['phrases', 'Phrases'], ['words', 'Words']] })}
-              ${box('rr', 'Respiratory rate', '/min')}${box('hr', 'Pulse', '/min')}${box('spo2', 'SpO2 on air', '%')}
-              ${box('pefEx', 'PEF', '% pred or best')}${box('pef1h', 'PEF 1 h after treatment', '% pred or best')}
-            </div>
-          </form>
-          <div class="card result">${resultBox('asExOut', 'Exacerbation')}</div>
-        </div>
-
-        <div class="card">
-          <h3 class="section-title">Approach to diagnosis</h3>
-          <div id="asDxTree">${Tree.render(DX_TREE)}</div>
-          <h3 class="section-title" style="margin-top:16px">Approach to exacerbation</h3>
-          <div id="asExTree">${Tree.render(EX_TREE)}</div>
-          <p class="tree-legend">Highlighted boxes show the path for the values entered.</p>
-        </div>
-        <div class="card">
-          <h3 class="section-title">Differential diagnosis of asthma</h3>
-          ${t(['Group', 'Clue', 'Conditions'], DDX_TABLE)}
-          <h3 class="section-title" style="margin-top:16px">Asthma vs COPD</h3>
-          ${t(['Feature', 'Asthma', 'COPD'], VS_COPD)}
-          <h3 class="section-title" style="margin-top:16px">ICS daily dose (mcg), adults and adolescents</h3>
-          ${t(['Inhaled corticosteroid', 'Low', 'Medium', 'High'], ICS_DOSE)}
-        </div>
-      </div>`;
-
-    const ids = ['fev1Pre', 'fev1Post', 'pefPre', 'pefPost', 'pefMax', 'pefMin', 'ics4Pre', 'ics4Post', 'chFall', 'bec', 'feno', 'rr', 'hr', 'spo2', 'pefEx', 'pef1h'];
-    const sels = ['chType', 'icsStatus', 'current', 'start', 'talk'];
-    const flags = ['typical', 'altered', 'hunched', ...CONTROL.map(c => c[0]), ...RISKS.map(r => r[0])];
-    const example = { typical: true, fev1Pre: 2.10, fev1Post: 2.45, bec: 350, feno: 62, cDay: true, cRel: true, rSaba: true };
-    Object.entries(example).forEach(([id, val]) => {
-      const i = el.querySelector('#' + id);
-      if (i.type === 'checkbox') i.checked = val; else i.value = val;
-    });
-
-    const update = () => {
-      const v = {};
-      ids.forEach(id => { const raw = el.querySelector('#' + id).value; v[id] = raw === '' ? null : Number(raw); });
-      sels.forEach(id => { v[id] = el.querySelector('#' + id).value; });
-      flags.forEach(id => { v[id] = el.querySelector('#' + id).checked; });
-      const res = interpret(v);
-      const put = (id, lines) => { el.querySelector(`#${id} pre`).textContent = lines.join('\n'); };
-      put('asDxOut', [res.dx.dx, '', ...res.dx.lines, '', 'Top 5 differential diagnoses:', ...ddx(res.ddxList)]);
-      put('asCtlOut', res.ctl.lines);
-      put('asTxOut', res.tx.lines);
-      put('asExOut', [res.ex.level, '', ...res.ex.lines]);
-      Tree.highlight(el.querySelector('#asDxTree'), res.dx.path);
-      Tree.highlight(el.querySelector('#asExTree'), res.ex.path);
-    };
-    el.querySelectorAll('form').forEach(f => {
-      f.addEventListener('input', update);
-      f.addEventListener('change', update);
-      f.addEventListener('submit', e => e.preventDefault());
-    });
-    update();
-  }
-
-  function interpret(v) {
-    const dx = diagnosis(v);
-    const ctl = control(v);
-    const tx = treatment(v, ctl);
-    const ex = exacerbation(v);
-    const ddxList = dx.path.has('noasthma') || dx.path.has('possible')
-      ? ['Vocal cord dysfunction', 'COPD', 'Bronchiectasis', 'Left ventricular failure', 'GERD or postnasal drip']
-      : dx.t2 ? ['Type 2 (allergic or eosinophilic) asthma', 'ABPA', 'EGPA', 'Eosinophilic bronchitis', 'Asthma-COPD overlap']
-        : ['Asthma', 'COPD', 'Vocal cord dysfunction', 'Bronchiectasis', 'Left ventricular failure'];
-    return { dx, ctl, tx, ex, ddxList };
-  }
-
-  const api = { render, interpret, diagnosis, control, treatment, exacerbation };
+  const api = { render, TOPIC };
   if (typeof window !== 'undefined') window.Asthma = api;
   if (typeof module !== 'undefined') module.exports = api;
 })();

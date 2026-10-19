@@ -5,6 +5,7 @@ const routes = {
   spirometry: window.Spirometry,
   asthma: window.Asthma,
   ild: window.ILD,
+  pleural: window.Pleural,
 };
 
 function renderHome(el) {

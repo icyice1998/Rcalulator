@@ -271,3 +271,20 @@ fieldset[hidden] { display: none !important; }
   .pft-table th, .pft-table td { padding: 3px 2px; }
   .pft-table tbody th { padding-right: 4px; font-size: 0.78rem; }
 }
+
+/* Topic pages */
+.topic p { max-width: 75ch; line-height: 1.55; }
+.topic-list { margin: 6px 0 12px; padding-left: 20px; display: grid; gap: 4px; max-width: 80ch; }
+.topic-sub { margin: 16px 0 6px; font-size: 0.95rem; }
+.topic .table-wrap { margin: 6px 0 12px; }
+.toc { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip {
+  border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  border-radius: 999px; padding: 4px 12px; font: inherit; font-size: 0.82rem; cursor: pointer;
+}
+.chip:hover { border-color: var(--accent); color: var(--accent); }
+section.card { scroll-margin-top: 12px; }
+.pe-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 12px; font-size: 0.85rem; margin-bottom: 8px; }
+.pe-grid label { display: flex; flex-direction: column; gap: 3px; }
+.pe-grid input { width: 100%; max-width: 110px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); font: inherit; }
+.pe-form { margin-bottom: 12px; }
