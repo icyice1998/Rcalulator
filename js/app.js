@@ -3,6 +3,8 @@ const routes = {
   'metabolic-acidosis': window.MetabolicAcidosis,
   dyskalemia: window.Dyskalemia,
   spirometry: window.Spirometry,
+  asthma: window.Asthma,
+  ild: window.ILD,
 };
 
 function renderHome(el) {

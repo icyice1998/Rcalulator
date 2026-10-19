@@ -160,13 +160,13 @@
   };
 
   const NEXT = {
-    obstruction: ['Correlate: asthma vs COPD (age, smoking, variability, eosinophils)', 'COPD: post-BD FEV1/FVC < 0.70 confirms; GOLD grade by post-BD FEV1',
+    obstruction: ['Next page: Chest > Asthma (diagnosis, control, treatment step)', 'Correlate: asthma vs COPD (age, smoking, variability, eosinophils)', 'COPD: post-BD FEV1/FVC < 0.70 confirms; GOLD grade by post-BD FEV1',
       'Lung volumes if FVC low (air trapping, RV/TLC > 40%); DLCO for emphysema'],
     mixed: ['Measure TLC to confirm true restriction (TLC < 80%)', 'DLCO to separate parenchymal from extraparenchymal cause'],
-    restriction: ['Spirometry suggests restriction only: confirm with TLC < 80%', 'DLCO low: parenchymal (ILD); DLCO normal: chest wall, neuromuscular, obesity',
+    restriction: ['Next page: Chest > Interstitial lung disease if parenchymal cause suspected', 'Spirometry suggests restriction only: confirm with TLC < 80%', 'DLCO low: parenchymal (ILD); DLCO normal: chest wall, neuromuscular, obesity',
       'MIP / MEP if neuromuscular weakness suspected; HRCT if ILD suspected'],
     sad: ['Common early finding in smokers and asthma; repeat over time', 'Consider methacholine challenge if asthma suspected'],
-    normal: ['If symptoms persist: methacholine challenge (asthma), DLCO (ILD, pulmonary vascular disease), CPET'],
+    normal: ['Variable symptoms: Chest > Asthma (normal spirometry does not exclude asthma)', 'If symptoms persist: methacholine challenge (asthma), DLCO (ILD, pulmonary vascular disease), CPET'],
   };
 
   // ---------- decision tree and tables ----------
