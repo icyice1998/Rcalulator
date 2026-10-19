@@ -1,4 +1,4 @@
-// ABG interpretation — stepwise physiological approach
+// ABG interpretation — oxygenation, ventilation, acid-base (physiological + base excess)
 (function () {
   const Workup = typeof window !== 'undefined' && window.AcidBaseWorkup
     ? window.AcidBaseWorkup : require('./acidbase-workup.js');
@@ -9,15 +9,15 @@
     paco2Low: 35, paco2High: 45,
     hco3Low: 22, hco3High: 26,
   };
+  const TOL = 2;     // +/- around predicted compensation
+  const BE_TOL = 2;  // +/- around predicted SBE / PaCO2 in the base excess approach
 
-  // Expected compensation; tol = acceptable deviation from the predicted value
-  const COMP = {
-    metAcidosis:  { tol: 2, text: 'Expected PaCO2 = 1.5 x HCO3 + 8 (+/-2)  [Winter]' },
-    metAlkalosis: { tol: 2, text: 'Expected PaCO2 = 40 + 0.7 x (HCO3 - 24) (+/-2)' },
-    respAcidAcute:   { k: 0.1,  tol: 2, text: 'Acute: HCO3 rises 1 per 10 mmHg PaCO2 rise' },
-    respAcidChronic: { k: 0.35, tol: 2, text: 'Chronic: HCO3 rises 3.5 per 10 mmHg PaCO2 rise' },
-    respAlkAcute:    { k: 0.2,  tol: 2, text: 'Acute: HCO3 falls 2 per 10 mmHg PaCO2 fall' },
-    respAlkChronic:  { k: 0.4,  tol: 2, text: 'Chronic: HCO3 falls 4 per 10 mmHg PaCO2 fall' },
+  // Respiratory compensation: HCO3 change per 1 mmHg PaCO2 change (range = textbook spread)
+  const RESP = {
+    acidAcute:   { k: [0.1, 0.1],   text: 'Acute: HCO3 +1 per 10 mmHg PaCO2 rise',       dph: 0.008 },
+    acidChronic: { k: [0.35, 0.4],  text: 'Chronic: HCO3 +3.5 to 4 per 10 mmHg PaCO2 rise', dph: 0.003 },
+    alkAcute:    { k: [0.2, 0.2],   text: 'Acute: HCO3 -2 per 10 mmHg PaCO2 fall',       dph: 0.008 },
+    alkChronic:  { k: [0.4, 0.5],   text: 'Chronic: HCO3 -4 to 5 per 10 mmHg PaCO2 fall',  dph: 0.002 },
   };
 
   const DISORDERS = {
@@ -29,15 +29,62 @@
   };
 
   const r1 = x => Math.round(x * 10) / 10;
+  const r2 = x => Math.round(x * 100) / 100;
   const has = (...xs) => xs.every(x => x !== null && x !== undefined && !Number.isNaN(x));
 
   // ---------- calculations ----------
+
+  function fraction(fio2) {
+    return fio2 > 1 ? fio2 / 100 : fio2;
+  }
+
+  function oxygenation(v) {
+    if (!has(v.pao2)) return null;
+    const assumed = !has(v.fio2);
+    const fio2 = assumed ? 0.21 : fraction(v.fio2);
+    const roomAir = Math.abs(fio2 - 0.21) < 0.005;
+    const rq = has(v.rq) ? v.rq : 0.8;
+    const patm = has(v.patm) ? v.patm : 760;
+    const res = { fio2, assumed, roomAir, rq, patm, pf: v.pao2 / fio2 };
+
+    if (roomAir) {
+      res.grade = v.pao2 < 40 ? 'Severe hypoxemia (< 40)'
+        : v.pao2 < 60 ? 'Moderate hypoxemia (< 60)'
+          : v.pao2 < 80 ? 'Mild hypoxemia (< 80)' : 'No hypoxemia (>= 80)';
+      res.hypoxemic = v.pao2 < 80;
+    } else {
+      res.hypoxemic = res.pf < 300;
+    }
+
+    if (has(v.paco2)) {
+      res.pAO2 = fio2 * (patm - 47) - v.paco2 / rq;
+      res.aa = res.pAO2 - v.pao2;
+      if (has(v.age)) {
+        res.aaNormal = 2.5 + v.age / 4;
+        res.aaWide = res.aa > res.aaNormal;
+      }
+    }
+    return res;
+  }
+
+  function ventilation(v) {
+    const res = {
+      status: v.paco2 < RANGE.paco2Low ? 'Hyperventilation (hypocapnia)'
+        : v.paco2 > RANGE.paco2High ? 'Hypoventilation (hypercapnia)' : 'Normal ventilation',
+    };
+    if (has(v.petco2)) {
+      res.vdvt = (v.paco2 - v.petco2) / v.paco2;
+      res.vdHigh = res.vdvt > 0.3;
+    }
+    return res;
+  }
 
   function consistency(v) {
     const hMeasured = Math.pow(10, 9 - v.ph);
     const hCalc = 24 * v.paco2 / v.hco3;
     const diff = Math.abs(hCalc - hMeasured) / hMeasured;
-    return { hMeasured, hCalc, ok: diff <= 0.1, diff };
+    const phCalc = 6.1 + Math.log10(v.hco3 / (0.03 * v.paco2));
+    return { hMeasured, hCalc, phCalc, ok: diff <= 0.1, diff };
   }
 
   function detectPrimary(v) {
@@ -62,88 +109,153 @@
     return { list: [] };
   }
 
-  function compensation(type, v, chronicity) {
-    const dC = v.paco2 - NORMAL.paco2;
-    const verdict = (actual, exp, tol, ifHigh, ifLow) => {
-      const lo = exp - tol, hi = exp + tol;
-      if (actual > hi) return { lo, hi, status: 'high', note: ifHigh };
-      if (actual < lo) return { lo, hi, status: 'low', note: ifLow };
-      return { lo, hi, status: 'ok', note: 'Appropriate compensation' };
-    };
+  function verdict(actual, lo, hi, ifHigh, ifLow) {
+    if (actual > hi) return { lo, hi, status: 'high', note: ifHigh };
+    if (actual < lo) return { lo, hi, status: 'low', note: ifLow };
+    return { lo, hi, status: 'ok', note: 'Appropriate compensation' };
+  }
 
+  function compensation(type, v, chronicity) {
     if (type === 'metAcidosis') {
-      const c = COMP.metAcidosis, exp = 1.5 * v.hco3 + 8;
-      return [{ formula: c.text, param: 'PaCO2', actual: v.paco2,
-        ...verdict(v.paco2, exp, c.tol,
+      const exp = 1.5 * v.hco3 + 8;
+      return [{ formula: 'Expected PaCO2 = 1.5 x HCO3 + 8 (+/-2)  [Winter]', param: 'PaCO2', actual: v.paco2,
+        ...verdict(v.paco2, exp - TOL, exp + TOL,
           'Concomitant respiratory acidosis (CNS depression / toxin, lung disease)',
           'Concomitant respiratory alkalosis (salicylate, sepsis)') }];
     }
     if (type === 'metAlkalosis') {
-      const c = COMP.metAlkalosis, exp = 40 + 0.7 * (v.hco3 - NORMAL.hco3);
-      return [{ formula: c.text, param: 'PaCO2', actual: v.paco2,
-        ...verdict(v.paco2, exp, c.tol, 'Concomitant respiratory acidosis', 'Concomitant respiratory alkalosis') }];
+      const a = 0.7 * v.hco3 + 20, b = 40 + 0.7 * (v.hco3 - NORMAL.hco3);
+      return [{ formula: 'Expected PaCO2 = 0.7 x HCO3 + 20 (+/-2)  or  40 + 0.7 x (HCO3 - 24)', param: 'PaCO2', actual: v.paco2,
+        ...verdict(v.paco2, Math.min(a, b) - TOL, Math.max(a, b) + TOL,
+          'Concomitant respiratory acidosis', 'Concomitant respiratory alkalosis') }];
     }
     if (type === 'respAcidosis' || type === 'respAlkalosis') {
       const acid = type === 'respAcidosis';
+      const dC = v.paco2 - NORMAL.paco2;
       const keys = chronicity === 'acute' ? ['Acute']
         : chronicity === 'chronic' ? ['Chronic'] : ['Acute', 'Chronic'];
       return keys.map(k => {
-        const c = COMP[(acid ? 'respAcid' : 'respAlk') + k];
-        const exp = NORMAL.hco3 + c.k * dC;
-        return { formula: c.text, param: 'HCO3', actual: v.hco3,
-          ...verdict(v.hco3, exp, c.tol, 'Concomitant metabolic alkalosis', 'Concomitant metabolic acidosis') };
+        const c = RESP[(acid ? 'acid' : 'alk') + k];
+        const e = c.k.map(x => NORMAL.hco3 + x * dC);
+        return { formula: c.text, param: 'HCO3', actual: v.hco3, phase: k,
+          ...verdict(v.hco3, Math.min(...e) - TOL, Math.max(...e) + TOL,
+            'Concomitant metabolic alkalosis', 'Concomitant metabolic acidosis') };
       });
     }
     return [];
   }
 
+  // pH-based estimate of acute vs chronic respiratory disorder
+  function respPhCheck(type, v) {
+    const acid = type === 'respAcidosis';
+    const dC = v.paco2 - NORMAL.paco2;
+    const acute = NORMAL.ph - RESP[acid ? 'acidAcute' : 'alkAcute'].dph * dC;
+    const chronic = NORMAL.ph - RESP[acid ? 'acidChronic' : 'alkChronic'].dph * dC;
+    const lo = Math.min(acute, chronic), hi = Math.max(acute, chronic);
+    let note;
+    if (Math.abs(v.ph - acute) <= 0.02) note = 'pH fits acute';
+    else if (Math.abs(v.ph - chronic) <= 0.02) note = 'pH fits chronic';
+    else if (v.ph > lo && v.ph < hi) note = 'pH between acute and chronic: acute-on-chronic or mixed';
+    else note = 'pH outside both predictions: superimposed metabolic disorder';
+    return { acute, chronic, note };
+  }
+
   function anionGap(v) {
     if (!has(v.na, v.cl, v.hco3)) return null;
+    const refAlb = has(v.refAlb) ? v.refAlb : NORMAL.alb;
     const ag = v.na - (v.cl + v.hco3);
-    const corr = has(v.alb) ? ag + 2.5 * (NORMAL.alb - v.alb) : null;
+    const corr = has(v.alb) ? ag + 2.5 * (refAlb - v.alb) : null;
     const used = corr ?? ag;
     const normalAg = has(v.normalAg) ? v.normalAg : 12;
-    const res = { ag, corr, used, normalAg, high: used > normalAg + 2 };
+    const res = { ag, corr, used, normalAg, refAlb, high: used > normalAg + 2 };
+    if (has(v.alb, v.phos)) res.expectedAg = 2 * v.alb + 0.5 * v.phos;
 
-    if (res.high && v.hco3 < NORMAL.hco3) {
-      const ratio = (used - normalAg) / (NORMAL.hco3 - v.hco3);
-      let note;
-      if (ratio < 0.4) note = 'Hyperchloremic normal-AG acidosis predominates';
-      else if (ratio < 0.8) note = 'Combined high-AG and normal-AG metabolic acidosis';
-      else if (ratio <= 2) note = 'Pure high-AG metabolic acidosis';
-      else note = 'High-AG acidosis with concomitant metabolic alkalosis (or pre-existing compensated respiratory acidosis)';
-      res.delta = { ratio, note };
-    } else if (res.high) {
-      res.delta = { ratio: null, note: 'High AG with HCO3 >= 24: suggests concomitant metabolic alkalosis' };
+    if (!res.high) return res;
+    const dAG = used - normalAg, dH = NORMAL.hco3 - v.hco3;
+    const d = { dAG, dH, diff: dAG - dH };
+
+    if (dH > 0) {
+      d.ratio = dAG / dH;
+      d.ratioNote = d.ratio < 0.4 ? 'normal-AG acidosis predominates'
+        : d.ratio < 0.8 ? 'high-AG + normal-AG metabolic acidosis'
+          : d.ratio <= 1.2 ? 'pure high-AG metabolic acidosis'
+            : d.ratio <= 2 ? 'borderline (pure range 0.8-1.6/2 in some texts) - check delta difference'
+              : 'high-AG acidosis + metabolic alkalosis';
     }
+    const band = x => x < -5 ? 'nagma' : x > 5 ? 'alk' : 'pure';
+    d.diffBand = band(d.diff);
+    if (has(v.lactate) && v.lactate > 2) {
+      d.lactDiff = 0.6 * dAG - dH;
+      d.final = band(d.lactDiff);
+      d.finalBasis = 'lactate-adjusted delta difference';
+    } else {
+      d.final = d.diffBand;
+      d.finalBasis = 'delta difference';
+    }
+    res.delta = d;
     return res;
   }
 
-  function oxygenation(v) {
-    if (!has(v.pao2, v.fio2)) return null;
-    const fio2 = v.fio2 > 1 ? v.fio2 / 100 : v.fio2;
-    const pf = v.pao2 / fio2;
-    const res = { pf, fio2 };
-    if (pf <= 100) res.pfNote = 'Severe (<=100)';
-    else if (pf <= 200) res.pfNote = 'Moderate (101-200)';
-    else if (pf <= 300) res.pfNote = 'Mild (201-300)';
-    else res.pfNote = 'Not in ARDS range (>300)';
+  const FINAL_TEXT = {
+    pure: 'Pure high-AG metabolic acidosis',
+    nagma: 'High-AG + normal-AG metabolic acidosis',
+    alk: 'High-AG metabolic acidosis + metabolic alkalosis',
+  };
 
-    if (has(v.paco2)) {
-      const patm = has(v.patm) ? v.patm : 760;
-      const pAO2 = fio2 * (patm - 47) - v.paco2 / 0.8;
-      res.pAO2 = pAO2;
-      res.aa = pAO2 - v.pao2;
-      if (has(v.age)) {
-        res.aaExpected = v.age / 4 + 4;
-        res.aaHigh = res.aa > res.aaExpected;
-      }
+  // Base excess (Copenhagen) approach, Berend NEJM 2018
+  function baseExcess(v, chronicity) {
+    if (!has(v.sbe)) return null;
+    const lines = [];
+    const found = [];
+    const acidemia = v.ph < 7.38, alkalemia = v.ph > 7.42;
+    lines.push(`pH ${v.ph}: ${acidemia ? 'acidemia (< 7.38)' : alkalemia ? 'alkalemia (> 7.42)' : 'normal (7.38-7.42)'}`);
+
+    const metAcid = v.sbe < -2, metAlk = v.sbe > 2;
+    const respAcid = v.paco2 > 42, respAlk = v.paco2 < 38;
+    if (acidemia) {
+      if (metAcid) found.push('metAcidosis');
+      if (respAcid) found.push('respAcidosis');
+    } else if (alkalemia) {
+      if (metAlk) found.push('metAlkalosis');
+      if (respAlk) found.push('respAlkalosis');
+    } else {
+      if (metAcid) found.push('metAcidosis');
+      if (metAlk) found.push('metAlkalosis');
+      if (respAcid) found.push('respAcidosis');
+      if (respAlk) found.push('respAlkalosis');
     }
-    return res;
+    if (!found.length) {
+      lines.push(`SBE ${v.sbe}, PaCO2 ${v.paco2}: no primary disorder by BE criteria`);
+      return { lines };
+    }
+
+    let flag = false;
+    found.forEach(t => {
+      if (t === 'metAcidosis' || t === 'metAlkalosis') {
+        const acid = t === 'metAcidosis';
+        const exp = 40 + (acid ? 1 : 0.6) * v.sbe;
+        const vd = verdict(v.paco2, exp - BE_TOL, exp + BE_TOL, '+ respiratory acidosis', '+ respiratory alkalosis');
+        lines.push(`${DISORDERS[t]} (SBE ${v.sbe} ${acid ? '< -2' : '> 2'})`);
+        lines.push(`  Expected PaCO2 = 40 + ${acid ? '' : '0.6 x '}SBE = ${r1(exp)} (+/-${BE_TOL}); measured ${v.paco2}: ${vd.note}`);
+        if (vd.status !== 'ok') flag = true;
+      } else {
+        const acid = t === 'respAcidosis';
+        lines.push(`${DISORDERS[t]} (PaCO2 ${v.paco2} ${acid ? '> 42' : '< 38'})`);
+        const phases = chronicity === 'acute' ? ['acute'] : chronicity === 'chronic' ? ['chronic'] : ['acute', 'chronic'];
+        phases.forEach(p => {
+          const exp = p === 'acute' ? 0 : 0.4 * (v.paco2 - 40);
+          const vd = verdict(v.sbe, exp - BE_TOL, exp + BE_TOL, '+ metabolic alkalosis', '+ metabolic acidosis');
+          lines.push(`  ${p === 'acute' ? 'Acute: expected SBE = 0' : `Chronic: expected SBE = 0.4 x (PaCO2 - 40) = ${r1(exp)}`} (+/-${BE_TOL}); measured ${v.sbe}: ${vd.note}`);
+          if (vd.status !== 'ok' && phases.length === 1) flag = true;
+        });
+      }
+    });
+    if (v.sbe < -6) lines.push('SBE < -6: severe metabolic acidosis (marker of hypoperfusion in trauma / shock)');
+    return { lines, flag };
   }
 
   function interpret(v) {
-    const out = { steps: [], errors: [], warnings: [] };
+    const out = { steps: [], errors: [], warnings: [], workups: [] };
     if (!has(v.ph, v.paco2, v.hco3)) {
       out.errors.push('pH, PaCO2 and HCO3 are required.');
       return out;
@@ -153,22 +265,56 @@
     if (v.hco3 < 1 || v.hco3 > 60) out.errors.push('HCO3 out of range (1-60 mEq/L).');
     if (out.errors.length) return out;
 
-    // Step 1: internal consistency
+    // 1. Oxygenation
+    const ox = oxygenation(v);
+    if (ox) {
+      const lines = [];
+      lines.push(`FiO2 ${ox.fio2}${ox.assumed ? ' (not entered - room air assumed)' : ''}`);
+      if (ox.roomAir) lines.push(`PaO2 ${v.pao2} on room air: ${ox.grade}`);
+      lines.push(`PaO2/FiO2 = ${Math.round(ox.pf)}` + (ox.pf <= 300
+        ? ` (${ox.pf <= 100 ? 'severe' : ox.pf <= 200 ? 'moderate' : 'mild'} range if ARDS criteria met: bilateral opacities, PEEP >= 5)` : ''));
+      if (ox.aa !== undefined) {
+        lines.push(`PAO2 = FiO2 x (${ox.patm} - 47) - PaCO2/${ox.rq} = ${r1(ox.pAO2)} mmHg`);
+        lines.push(`A-a gradient = PAO2 - PaO2 = ${r1(ox.aa)} mmHg` + (ox.aaNormal !== undefined
+          ? `; normal <= 2.5 + age/4 = ${r1(ox.aaNormal)}: ${ox.aaWide ? 'Wide' : 'Normal'}`
+          : '; enter age for normal value'));
+        if (!ox.roomAir) lines.push('  Age-based A-a reference applies to room air; A-a widens normally with higher FiO2');
+        if (ox.hypoxemic && ox.aaNormal !== undefined) {
+          if (ox.aaWide) lines.push('Mechanism (wide A-a, low P/F): V/Q mismatch, shunt, diffusion abnormality, low ScvO2');
+          else lines.push(`Mechanism (normal A-a): ${v.paco2 > RANGE.paco2High ? 'alveolar hypoventilation (PaCO2 high)' : 'low PiO2 (altitude) or alveolar hypoventilation'}`);
+        }
+      }
+      out.steps.push({ title: '1  Oxygenation', lines, flag: ox.hypoxemic || ox.aaWide });
+    } else {
+      out.steps.push({ title: '1  Oxygenation', lines: ['Enter PaO2 (and FiO2, age) to assess oxygenation'], muted: true });
+    }
+
+    // 2. Ventilation
+    const vent = ventilation(v);
+    const vLines = [`PaCO2 ${v.paco2} mmHg: ${vent.status}`];
+    if (vent.vdvt !== undefined) {
+      vLines.push(`Vd/Vt = (PaCO2 - PetCO2) / PaCO2 = ${r2(vent.vdvt)} (normal 0.3)`);
+      if (vent.vdHigh) vLines.push('  Increased dead space: emphysema, low cardiac output / pulmonary embolism, high PEEP / auto-PEEP');
+    }
+    out.steps.push({ title: '2  Ventilation', lines: vLines, flag: vent.status !== 'Normal ventilation' || vent.vdHigh });
+
+    // 3.1 Internal consistency
     const cons = consistency(v);
     out.steps.push({
-      title: 'Step 1  Internal consistency (Henderson)',
+      title: '3.1  Internal consistency',
       lines: [
         `[H+] from pH = ${r1(cons.hMeasured)} nmol/L; 24 x PaCO2 / HCO3 = ${r1(cons.hCalc)} nmol/L`,
+        `pH = 6.1 + log(HCO3 / (0.03 x PaCO2)) = ${r2(cons.phCalc)}`,
         cons.ok ? 'Consistent (within 10%)' : `Inconsistent (${Math.round(cons.diff * 100)}% difference) - check sample or transcription`,
       ],
       flag: !cons.ok,
     });
 
-    // Step 2: pH status
+    // 3.2 pH
     const phStatus = v.ph < RANGE.phLow ? 'Acidemia' : v.ph > RANGE.phHigh ? 'Alkalemia' : 'Normal pH';
-    out.steps.push({ title: 'Step 2  pH', lines: [`pH ${v.ph}: ${phStatus}`] });
+    out.steps.push({ title: '3.2  pH', lines: [`pH ${v.ph}: ${phStatus} (7.35-7.45)`] });
 
-    // Step 3: primary disorder
+    // 3.3 Primary disorder
     let primary;
     if (v.selected && v.selected !== 'auto') {
       primary = { list: [v.selected], userSelected: true };
@@ -183,11 +329,12 @@
       ? [primary.list.map(k => DISORDERS[k]).join(' + ') + (primary.userSelected ? ' (user selected)' : '')]
       : ['No primary acid-base disorder identified from pH / PaCO2 / HCO3'];
     if (primary.mixed) pLines.push('Mixed disorder: PaCO2 and HCO3 both deviate in the direction of the pH change');
-    if (primary.normalPh && primary.list.length) pLines.push('pH within normal range despite abnormal PaCO2 and HCO3: near-complete compensation or mixed disorder (see Step 4)');
-    out.steps.push({ title: 'Step 3  Primary disorder', lines: pLines });
+    if (primary.normalPh && primary.list.length) pLines.push('pH within normal range despite abnormal PaCO2 and HCO3: near-complete compensation or mixed disorder (see 3.4)');
+    out.steps.push({ title: '3.3  Primary disorder', lines: pLines });
 
-    // Step 4: compensation (first/primary disorder only when not mixed)
-    if (primary.list.length && !primary.mixed) {
+    // 3.4 Compensation
+    const concomitant = [];
+    if (primary.list.length) {
       const type = primary.list[0];
       const comps = compensation(type, v, v.chronicity);
       const lines = [];
@@ -195,67 +342,66 @@
         lines.push(c.formula);
         lines.push(`  Expected ${c.param} ${r1(c.lo)} - ${r1(c.hi)}; measured ${c.actual}: ${c.note}`);
       });
-      if (comps.length === 2) {
-        const [a, ch] = comps;
-        const lo = Math.min(a.lo, ch.lo), hi = Math.max(a.hi, ch.hi);
-        if (v.hco3 >= lo && v.hco3 <= hi && a.status !== 'ok' && ch.status !== 'ok')
-          lines.push('  HCO3 lies between acute and chronic predictions: consider acute-on-chronic');
+      if (comps.length === 1 && comps[0].status !== 'ok') concomitant.push(comps[0].note);
+      if (comps.length === 2 && comps.every(c => c.status === comps[0].status) && comps[0].status !== 'ok')
+        concomitant.push(comps[0].note);
+      if (primary.mixed) lines.push('  (mixed disorder: shown for the first disorder to confirm the second)');
+      if (type === 'respAcidosis' || type === 'respAlkalosis') {
+        const p = respPhCheck(type, v);
+        lines.push(`pH prediction: acute ${r2(p.acute)}, chronic ${r2(p.chronic)}; measured ${v.ph}: ${p.note}`);
       }
-      out.steps.push({ title: 'Step 4  Expected compensation', lines, flag: comps.some(c => c.status !== 'ok') });
+      out.steps.push({ title: '3.4  Expected compensation', lines, flag: comps.some(c => c.status !== 'ok') });
     }
 
-    // Step 5: anion gap
+    // 3.5 Anion gap and delta
     const ag = anionGap(v);
     if (ag) {
       const lines = [`AG = Na - (Cl + HCO3) = ${r1(ag.ag)} mEq/L`];
-      if (ag.corr !== null) lines.push(`Albumin-corrected AG = AG + 2.5 x (4 - albumin) = ${r1(ag.corr)} mEq/L`);
+      if (ag.corr !== null) lines.push(`Albumin-corrected AG = AG + 2.5 x (${ag.refAlb} - albumin) = ${r1(ag.corr)} mEq/L`);
+      if (ag.expectedAg !== undefined) lines.push(`Expected normal AG = 2 x albumin + 0.5 x phosphate (mg/dL) = ${r1(ag.expectedAg)} mEq/L`);
       lines.push(ag.high ? `Elevated (normal ${ag.normalAg} +/- 2)` : `Not elevated (normal ${ag.normalAg} +/- 2)`);
-      if (ag.delta) {
-        if (ag.delta.ratio !== null)
-          lines.push(`Delta ratio = (AG - ${ag.normalAg}) / (24 - HCO3) = ${Math.round(ag.delta.ratio * 100) / 100}`);
-        lines.push(ag.delta.note);
+      const d = ag.delta;
+      if (d) {
+        if (d.ratio !== undefined) lines.push(`Delta ratio = (AG - ${ag.normalAg}) / (24 - HCO3) = ${r2(d.ratio)}: ${d.ratioNote}`);
+        lines.push(`Delta difference = (AG - ${ag.normalAg}) - (24 - HCO3) = ${r1(d.diff)} (-5 to +5 pure)`);
+        if (d.lactDiff !== undefined) lines.push(`Lactic acidosis: 0.6 x dAG - dHCO3 = ${r1(d.lactDiff)}`);
+        lines.push(`Conclusion (${d.finalBasis}): ${FINAL_TEXT[d.final]}`);
       }
       if (ag.high && !primary.list.includes('metAcidosis'))
         lines.push('High AG present despite no primary metabolic acidosis on pH/HCO3: hidden HAGMA');
-      out.steps.push({ title: 'Step 5  Anion gap', lines, flag: ag.high });
+      out.steps.push({ title: '3.5  Anion gap and delta gap', lines, flag: ag.high });
     } else {
-      out.steps.push({ title: 'Step 5  Anion gap', lines: ['Enter Na and Cl to calculate (always check, even if pH is normal)'], muted: true });
+      out.steps.push({ title: '3.5  Anion gap', lines: ['Enter Na and Cl to calculate (always check, even if pH is normal)'], muted: true });
     }
 
-    // Step 6: oxygenation
-    const ox = oxygenation(v);
-    if (ox) {
-      const lines = [`P/F ratio = ${Math.round(ox.pf)}: ${ox.pfNote}`];
-      if (ox.aa !== undefined) {
-        lines.push(`PAO2 = FiO2 x (Patm - 47) - PaCO2/0.8 = ${Math.round(ox.pAO2)} mmHg`);
-        lines.push(`A-a gradient = ${Math.round(ox.aa)} mmHg` +
-          (ox.aaExpected !== undefined
-            ? ` (expected <= ${r1(ox.aaExpected)} for age): ${ox.aaHigh ? 'Elevated' : 'Normal'}`
-            : ' (enter age for expected value)'));
-      }
-      out.steps.push({ title: 'Step 6  Oxygenation', lines, flag: ox.pf <= 300 || ox.aaHigh });
-    }
+    // 3.6 Base excess approach
+    const be = baseExcess(v, v.chronicity);
+    if (be) out.steps.push({ title: '3.6  Base excess approach (Copenhagen)', lines: be.lines, flag: be.flag });
 
-    // Step 7: second-tier workup
-    out.workups = [];
-    const metAcid = primary.list.includes('metAcidosis') || v.hco3 < RANGE.hco3Low;
+    // 4. Further workup
+    const has_ = t => primary.list.includes(t);
+    const metAcid = has_('metAcidosis') || concomitant.includes('Concomitant metabolic acidosis');
     if (ag && ag.high) {
       out.workups.push('hagma');
-      out.steps.push({ title: 'Step 7  Further workup: High-AG metabolic acidosis', ...Workup.hagma(v) });
-      if (ag.delta && ag.delta.ratio !== null && ag.delta.ratio < 0.8) {
+      out.steps.push({ title: '4  Further workup: High-AG metabolic acidosis', ...Workup.hagma(v) });
+      if (ag.delta && ag.delta.final === 'nagma') {
         out.workups.push('urine');
-        out.steps.push({ title: 'Step 7  Further workup: coexisting normal-AG acidosis', ...Workup.nagma(v) });
+        out.steps.push({ title: '4  Further workup: coexisting normal-AG acidosis', ...Workup.nagma(v) });
       }
     } else if (ag && metAcid) {
       out.workups.push('urine');
-      out.steps.push({ title: 'Step 7  Further workup: Normal-AG metabolic acidosis', ...Workup.nagma(v) });
+      out.steps.push({ title: '4  Further workup: Normal-AG metabolic acidosis', ...Workup.nagma(v) });
     } else if (!ag && metAcid) {
-      out.steps.push({ title: 'Step 7  Further workup', lines: ['Enter Na and Cl to classify metabolic acidosis as high-AG or normal-AG'], muted: true });
+      out.steps.push({ title: '4  Further workup', lines: ['Enter Na and Cl to classify metabolic acidosis as high-AG or normal-AG'], muted: true });
     }
-    if (primary.list.includes('metAlkalosis') || (ag && ag.delta && ag.delta.ratio > 2)) {
+    if (has_('metAlkalosis') || (ag && ag.delta && ag.delta.final === 'alk')) {
       out.workups.push('urine', 'alk');
-      out.steps.push({ title: 'Step 7  Further workup: Metabolic alkalosis', ...Workup.metAlkalosis(v) });
+      out.steps.push({ title: '4  Further workup: Metabolic alkalosis', ...Workup.metAlkalosis(v) });
     }
+    if (has_('respAcidosis') || concomitant.some(c => c.startsWith('Concomitant respiratory acidosis')))
+      out.steps.push({ title: '4  Causes: Respiratory acidosis', ...Workup.respAcidosis(v) });
+    if (has_('respAlkalosis'))
+      out.steps.push({ title: '4  Causes: Respiratory alkalosis', ...Workup.respAlkalosis(v) });
 
     return out;
   }
@@ -266,15 +412,20 @@
     { group: 'Blood gas', id: 'ph',    label: 'pH',    unit: '',      step: '0.01' },
     { group: 'Blood gas', id: 'paco2', label: 'PaCO2', unit: 'mmHg',  step: '0.1' },
     { group: 'Blood gas', id: 'hco3',  label: 'HCO3-', unit: 'mEq/L', step: '0.1' },
+    { group: 'Blood gas', id: 'sbe',   label: 'SBE (optional)', unit: 'mmol/L', step: '0.1' },
     { group: 'Electrolytes', id: 'na',  label: 'Na+',     unit: 'mEq/L', step: '0.1' },
     { group: 'Electrolytes', id: 'k',   label: 'K+',      unit: 'mEq/L', step: '0.1' },
     { group: 'Electrolytes', id: 'cl',  label: 'Cl-',     unit: 'mEq/L', step: '0.1' },
     { group: 'Electrolytes', id: 'alb', label: 'Albumin', unit: 'g/dL',  step: '0.1' },
+    { group: 'Electrolytes', id: 'refAlb', label: 'Reference albumin', unit: 'g/dL', step: '0.1', placeholder: '4' },
+    { group: 'Electrolytes', id: 'phos', label: 'Phosphate', unit: 'mg/dL', step: '0.1' },
     { group: 'Electrolytes', id: 'normalAg', label: 'Lab normal AG', unit: 'mEq/L', step: '1', placeholder: '12' },
     { group: 'Oxygenation', id: 'pao2', label: 'PaO2', unit: 'mmHg', step: '0.1' },
     { group: 'Oxygenation', id: 'fio2', label: 'FiO2', unit: '% or fraction', step: '0.01' },
     { group: 'Oxygenation', id: 'age',  label: 'Age',  unit: 'years', step: '1' },
     { group: 'Oxygenation', id: 'patm', label: 'Patm', unit: 'mmHg', step: '1', placeholder: '760' },
+    { group: 'Oxygenation', id: 'rq',   label: 'RQ', unit: '', step: '0.1', placeholder: '0.8' },
+    { group: 'Oxygenation', id: 'petco2', label: 'PetCO2 (optional)', unit: 'mmHg', step: '1' },
 
     { group: 'Urine studies', key: 'urine', id: 'una',   label: 'Urine Na',   unit: 'mEq/L', step: '1' },
     { group: 'Urine studies', key: 'urine', id: 'uk',    label: 'Urine K',    unit: 'mEq/L', step: '1' },
@@ -407,33 +558,53 @@
   }
 
   function referenceText() {
-    return esc(`Reference ranges
-  pH 7.35-7.45 | PaCO2 35-45 mmHg | HCO3 22-26 mEq/L
+    return esc(`Order: 1 Oxygenation -> 2 Ventilation -> 3 Acid-base -> 4 Workup
 
-Internal consistency
-  [H+] (nmol/L) = 24 x PaCO2 / HCO3 ;  [H+] = 10^(9 - pH)
+Reference ranges (ABG)
+  pH 7.35-7.45 | PaCO2 35-45 mmHg | HCO3 22-26 mEq/L | PaO2 85-100 | SBE -2 to +2
+  (VBG: pH 7.32-7.42, PvCO2 38-48, PvO2 35-45)
 
-Expected compensation
-  Metabolic acidosis     PaCO2 = 1.5 x HCO3 + 8 (+/-2)        Winter
-  Metabolic alkalosis    PaCO2 = 40 + 0.7 x (HCO3 - 24) (+/-2)
-  Resp acidosis  acute   HCO3 +1   per 10 mmHg PaCO2 rise
-                 chronic HCO3 +3.5 per 10 mmHg PaCO2 rise
-  Resp alkalosis acute   HCO3 -2   per 10 mmHg PaCO2 fall
-                 chronic HCO3 -4   per 10 mmHg PaCO2 fall
+1 Oxygenation
+  PaO2 on room air: < 80 mild, < 60 moderate, < 40 severe hypoxemia
+  PAO2 = FiO2 x (Patm - 47) - PaCO2 / RQ      (Patm 760 -> 713; RQ 0.8)
+  A-a gradient = PAO2 - PaO2 ; normal <= 2.5 + age/4 (or 0.3 x age)
+    Normal A-a: low PiO2, alveolar hypoventilation
+    Wide A-a / low P/F: V/Q mismatch, shunt, diffusion, low ScvO2
+  P/F = PaO2 / FiO2 ; Berlin ARDS mild 201-300, moderate 101-200, severe <= 100
 
-Anion gap
-  AG = Na - (Cl + HCO3)             normal 12 +/- 2 (lab-dependent)
-  Corrected AG = AG + 2.5 x (4 - albumin g/dL)
+2 Ventilation
+  PaCO2 < 35 hyperventilation ; > 45 hypoventilation
+  PaCO2 = 0.863 x VCO2 / (RR x VT x (1 - Vd/Vt))
+  Vd/Vt = (PaCO2 - PetCO2) / PaCO2 ; normal 0.3
+
+3 Acid-base (physiological approach)
+  [H+] (nmol/L) = 24 x PaCO2 / HCO3 ; pH = 6.1 + log(HCO3 / (0.03 x PaCO2))
+  Metabolic acidosis     PaCO2 = 1.5 x HCO3 + 8 (+/-2)         Winter
+  Metabolic alkalosis    PaCO2 = 0.7 x HCO3 + 20 (+/-2)
+                         or PaCO2 - 40 = 0.7 x (HCO3 - 24)
+  Resp acidosis  acute   HCO3 +1 per 10 PaCO2      pH -0.08 per 10
+                 chronic HCO3 +4 (3.5) per 10      pH -0.03 per 10
+  Resp alkalosis acute   HCO3 -2 per 10            pH +0.08 per 10
+                 chronic HCO3 -5 (4) per 10        pH +0.02 per 10
+
+  AG = Na - (Cl + HCO3)              normal 12 +/- 2 (lab-dependent)
+  Corrected AG = AG + 2.5 x (4 or 4.5 - albumin)
+  Expected AG = 2 x albumin + 0.5 x phosphate (mg/dL)
   Delta ratio = (AG - 12) / (24 - HCO3)
-    < 0.4      hyperchloremic normal-AG acidosis
-    0.4 - 0.8  combined high-AG + normal-AG acidosis
-    0.8 - 2.0  pure high-AG acidosis
-    > 2.0      high-AG acidosis + metabolic alkalosis
+    < 0.8          high-AG + normal-AG acidosis (< 0.4 normal-AG predominant)
+    0.8 - 1.2      pure high-AG acidosis (0.8 - 1.6/2 in some texts)
+    > 2 (> 1.2)    high-AG acidosis + metabolic alkalosis
+  Delta difference = (AG - 12) - (24 - HCO3)
+    -5 to +5 pure ; < -5 + normal-AG acidosis ; > +5 + metabolic alkalosis
+    Lactic acidosis: 0.6 x (AG - 12) - (24 - HCO3)
 
-Oxygenation
-  P/F = PaO2 / FiO2     Berlin ARDS: mild 201-300, moderate 101-200, severe <=100
-  PAO2 = FiO2 x (Patm - 47) - PaCO2 / 0.8
-  A-a gradient = PAO2 - PaO2 ; expected (room air) <= age/4 + 4
+3.6 Base excess approach (Copenhagen rules)
+  Acidemia pH < 7.38 ; alkalemia pH > 7.42
+  Metabolic acidosis  SBE < -2    expected PaCO2 = 40 + SBE
+  Metabolic alkalosis SBE > +2    expected PaCO2 = 40 + 0.6 x SBE
+  Resp acidosis  PaCO2 > 42 (45)  acute SBE = 0 +/- 2 ; chronic SBE = 0.4 x (PaCO2 - 40)
+  Resp alkalosis PaCO2 < 38 (35)  acute SBE = 0 +/- 2 ; chronic SBE = 0.4 x (PaCO2 - 40)
+  SBE < -6 severe metabolic acidosis
 
 Normal-AG metabolic acidosis (spot urine while pH < 7.35)
   UNC = (UNa + UK) - UCl          negative: GI loss / pRTA ; positive: impaired NH4+
@@ -449,7 +620,7 @@ Normal-AG metabolic acidosis (spot urine while pH < 7.35)
 High-AG metabolic acidosis
   L-lactate -> ketone -> renal insufficiency -> D-lactate -> toxin
   Calc Sosm = 2Na + BUN/2.8 + Glucose/18
-  Serum OG = measured - calculated   > 10 elevated ; > 20-25 toxic alcohol
+  Serum OG = measured - calculated   > 10 elevated ; > 25 methanol / ethylene glycol
   High OG: methanol, ethylene glycol, propylene glycol
   Normal OG: salicylate, hippurate (toluene), pyroglutamate
 
@@ -462,6 +633,8 @@ Metabolic alkalosis
   Primary aldosteronism: PAC >= 10 ng/dL, PRA <= 1 ng/mL/h, ARR > 20
 
 Sources
+  Poompichet A. Arterial blood gas interpretation. Division of Critical Care
+    Medicine, Siriraj Hospital (lecture).
   Nata N. Case-based approach of normal anion gap metabolic acidosis.
     Nephrology Division, Phramongkutklao Hospital (lecture).
   Khemmongkon M. Electrolyte and acid-base disorders 2026 (lecture).
@@ -474,6 +647,8 @@ Sources
   Figge J, et al. Anion gap and hypoalbuminemia. Crit Care Med 1998;26:1807-10.
   ARDS Definition Task Force. Acute respiratory distress syndrome:
     the Berlin Definition. JAMA 2012;307:2526-33.
+  Berend K. Diagnostic use of base excess in acid-base disorders.
+    N Engl J Med 2018;378:1419-28.
   Batlle DC, et al. The use of the urinary anion gap in the diagnosis of
     hyperchloremic metabolic acidosis. N Engl J Med 1988;318:594-9.
   Kraut JA, Madias NE. Differential diagnosis of nongap metabolic acidosis:
@@ -484,7 +659,7 @@ Sources
     clinical practice guideline. J Clin Endocrinol Metab 2016;101:1889-916.`);
   }
 
-  const api = { render, interpret, consistency, detectPrimary, compensation, anionGap, oxygenation };
+  const api = { render, interpret, consistency, detectPrimary, compensation, anionGap, oxygenation, ventilation, baseExcess };
   if (typeof window !== 'undefined') window.ABG = api;
   if (typeof module !== 'undefined') module.exports = api;
 })();

@@ -68,7 +68,9 @@
     } else {
       lines.push('');
       lines.push('Adequate NH4+ excretion: extrarenal or proximal HCO3 loss');
-      lines.push('  GI loss (diarrhea, ostomy) | pRTA | dilutional (large IV saline) | acid load (HCl, NH4Cl, TPN)');
+      lines.push('  GI loss: diarrhea, ostomy, ureteral diversion, pancreatic / biliary fistula');
+      lines.push('  pRTA: acetazolamide, topiramate, ifosfamide, tenofovir, myeloma, Fanconi; toluene (late)');
+      lines.push('  Other: NSS resuscitation (dilutional), hyperalimentation, HCl / NH4Cl / cholestyramine');
       if (has(v.k) && v.k < 3.5)
         lines.push(`  Hypokalemia with urine K ${has(v.uk) ? v.uk : '-'}: ` +
           (v.uk > 15 ? 'renal K loss (> 15) favours pRTA' : 'low urine K (<= 15) favours GI loss'));
@@ -101,7 +103,7 @@
     }
     if (has(v.ketone)) {
       const hi = v.ketone >= 3;
-      lines.push(`Ketone (beta-OHB) ${v.ketone} mmol/L: ${hi ? '>= 3.0, ketoacidosis (DKA / AKA / starvation)' : v.ketone > 0.6 ? 'mild ketosis (starvation or AKA possible)' : 'not significant'}`);
+      lines.push(`Ketone (beta-OHB) ${v.ketone} mmol/L: ${hi ? '>= 3.0, ketoacidosis (DKA, alcoholic, starvation)' : v.ketone > 0.6 ? 'mild ketosis (starvation or AKA possible)' : 'not significant'}`);
       if (hi) explained.push('ketone');
     }
     if (has(v.egfr)) {
@@ -113,9 +115,14 @@
       lines.push('Enter lactate, ketone and eGFR in "HAGMA workup"');
 
     if (explained.length && has(v.lactate) && v.lactate > 2)
-      lines.push('  Lactate: type A (shock, hypoperfusion) vs type B (metformin, malignancy, thiamine def., toxin, liver failure)');
+      lines.push('  Type A (hypoxic): shock, hypoxemia, mesenteric ischemia, CO, cyanide',
+        '  Type B: thiamine deficiency; metformin, NRTI, propofol, niacin, isoniazid, iron;',
+        '          salicylate, toxic alcohols, toluene (early); malignancy; liver failure (impaired clearance)');
     if (!explained.length && (has(v.lactate) || has(v.ketone) || has(v.egfr)))
-      lines.push('Not explained by L/K/R: consider D-lactate (short bowel, bowel bypass) then toxins');
+      lines.push('Non-lactate, non-ketone:',
+        '  Toxic: alcohols (methanol, ethylene glycol, ethanol), salicylate, toluene - check osmolal gap',
+        '  Non-toxic: cell lysis (rhabdomyolysis, TLS, hemolysis, ischemia-reperfusion), renal failure (GFR < 20)',
+        '  Others: D-lactate (short bowel), pyroglutamic acid (5-oxoproline), penicillin-derived antibiotics');
 
     if (has(v.sosm, v.na, v.bun, v.glu)) {
       const cSosm = 2 * v.na + v.bun / 2.8 + v.glu / 18;
@@ -124,8 +131,8 @@
       lines.push('');
       lines.push(`Calculated Sosm = 2Na + BUN/2.8 + Glucose/18 = ${Math.round(cSosm)} mOsm/kg`);
       lines.push(`Serum osmolal gap = ${Math.round(og)} mOsm/kg: ` +
-        (og > 20 ? '> 20, strongly suggests toxic alcohol (methanol, ethylene glycol, propylene glycol)'
-          : og > 10 ? '> 10, elevated (toxic alcohol, ethanol, also lactic/ketoacidosis can raise slightly)'
+        (og > 25 ? '> 25, toxic alcohol: methanol, ethylene glycol (also ethanol, propylene glycol, isopropanol)'
+          : og > 10 ? '10-25, elevated: toxic alcohol possible; ethanol, lactic / ketoacidosis can also raise OG'
             : 'normal (<= 10)'));
       if (og <= 10) lines.push('  Normal OG toxins: salicylate, hippurate (toluene), pyroglutamate (5-oxoproline, paracetamol)');
       lines.push('  Ethanol raises OG: subtract ethanol (mg/dL) / 3.7 if level available');
@@ -146,11 +153,11 @@
       lines.push('Enter urine Cl (urine Na is unreliable because of bicarbonaturia)');
       res.missing = true;
     } else if (v.ucl < 20) {
-      lines.push(`Urine Cl ${v.ucl} < 20: Extra-renal salt loss (chloride responsive)`);
+      lines.push(`Urine Cl ${v.ucl} < 20: Chloride-responsive (extra-renal salt loss)`);
       lines.push('  Vomiting / NG drain, villous adenoma, congenital chloridorrhea, laxative, cystic fibrosis,');
       lines.push('  post-hypercapnia, non-reabsorbable anion, remote diuretic use');
     } else {
-      lines.push(`Urine Cl ${v.ucl} >= 20: assess BP / volume`);
+      lines.push(`Urine Cl ${v.ucl} >= 20: Chloride-resistant (or current diuretic) - assess BP / volume`);
       if (v.bp === 'high') {
         lines.push('  Hypertension: mineralocorticoid excess - check PAC / PRA');
       } else if (v.bp === 'low') {
@@ -188,7 +195,29 @@
     return res;
   }
 
-  const api = { nagma, hagma, metAlkalosis };
+  // ---------- Respiratory disorders ----------
+
+  function respAcidosis() {
+    return { lines: [
+      "Won't breathe (CNS depression, low RR): sedatives, head injury, brainstem stroke,",
+      '  CNS infection, metabolic alkalosis, hypothyroidism',
+      "Can't breathe:",
+      '  Neuromuscular (low VT, NIF weaker than -25 cmH2O): MND, NMJ disease, myopathy',
+      '  Lung parenchyma (low VT, high Vd/Vt): pneumonia, CHF, ARDS, ILD',
+      '  Airway (high Vd/Vt, auto-PEEP): COPD, asthma',
+      '  Thoracic (low compliance): chest wall deformity, pleural disease, abdominal compartment syndrome',
+    ] };
+  }
+
+  function respAlkalosis() {
+    return { lines: [
+      'Primary hyperventilation: pain, anxiety, fever, CNS disorders, sepsis, liver failure, pregnancy,',
+      '  drugs (salicylate, progesterone, theophylline, beta-agonist), mechanical ventilation',
+      'Secondary hyperventilation: pneumonia, CHF, asthma, pulmonary embolism, restrictive lung disease',
+    ] };
+  }
+
+  const api = { nagma, hagma, metAlkalosis, respAcidosis, respAlkalosis };
   if (typeof window !== 'undefined') window.AcidBaseWorkup = api;
   if (typeof module !== 'undefined') module.exports = api;
 })();
