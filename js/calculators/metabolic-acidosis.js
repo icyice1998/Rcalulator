@@ -1,6 +1,7 @@
 // Metabolic acidosis: anion gap classification and second-tier workup
 (function () {
   const UI = typeof window !== 'undefined' && window.UI ? window.UI : require('../ui.js');
+  const Tree = typeof window !== 'undefined' && window.Tree ? window.Tree : require('../tree.js');
   const Workup = typeof window !== 'undefined' && window.AcidBaseWorkup
     ? window.AcidBaseWorkup : require('./acidbase-workup.js');
 
@@ -77,7 +78,7 @@
   ];
 
   function interpret(v) {
-    const out = { steps: [], errors: [], warnings: [], workups: [] };
+    const out = { steps: [], errors: [], warnings: [], workups: [], path: new Set() };
     if (!has(v.na, v.cl, v.hco3)) {
       out.errors.push('Na, Cl and HCO3 are required.');
       return out;
@@ -85,8 +86,12 @@
     if (v.hco3 >= 22) out.warnings.push(`HCO3 ${v.hco3} is not low: metabolic acidosis not evident (AG still reported for hidden HAGMA).`);
     if (has(v.ph) && v.ph >= 7.35) out.warnings.push(`pH ${v.ph} is not acidemic: consider mixed disorder; urine NH4+ indices are valid only while pH < 7.35.`);
 
+    if (v.hco3 < 22) out.path.add('ma');
+    out.path.add('ag');
+
     // 1. Compensation
     if (has(v.paco2)) {
+      out.path.add('winter');
       const exp = 1.5 * v.hco3 + 8;
       const note = v.paco2 > exp + 2 ? 'Concomitant respiratory acidosis (CNS depression / toxin, lung disease)'
         : v.paco2 < exp - 2 ? 'Concomitant respiratory alkalosis (salicylate, sepsis)' : 'Appropriate compensation';
@@ -117,19 +122,116 @@
     // 3. Workup
     if (ag.high) {
       out.workups.push('hagma');
-      out.steps.push({ title: '3  High-AG metabolic acidosis', ...Workup.hagma(v) });
+      const h = Workup.hagma(v);
+      out.steps.push({ title: '3  High-AG metabolic acidosis', ...h });
+      out.path.add('hagma');
+      (HAGMA_PATH[h.key] || []).forEach(n => out.path.add(n));
       if (d && d.final === 'nagma') {
         out.workups.push('urine');
-        out.steps.push({ title: '3  Coexisting normal-AG metabolic acidosis', ...Workup.nagma(v) });
+        const n = Workup.nagma(v);
+        out.steps.push({ title: '3  Coexisting normal-AG metabolic acidosis', ...n });
+        out.path.add('nagma');
+        (NAGMA_PATH[n.key] || []).forEach(x => out.path.add(x));
       }
       if (d && d.final === 'alk') out.steps.push({ title: '3  Coexisting metabolic alkalosis', lines: [
         'Check urine Cl and blood pressure (metabolic alkalosis workup)'] });
     } else if (v.hco3 < 22) {
       out.workups.push('urine');
-      out.steps.push({ title: '3  Normal-AG metabolic acidosis', ...Workup.nagma(v) });
+      const n = Workup.nagma(v);
+      out.steps.push({ title: '3  Normal-AG metabolic acidosis', ...n });
+      out.path.add('nagma');
+      (NAGMA_PATH[n.key] || []).forEach(x => out.path.add(x));
     }
     return out;
   }
+
+  // ---------- Approach (decision tree) and etiology ----------
+
+  const HAGMA_PATH = {
+    lactic: ['lactic'], keto: ['keto'], renal: ['renal'],
+    toxicAlcohol: ['nonlk', 'toxic'], nonLK: ['nonlk', 'othertox'],
+  };
+  const NAGMA_PATH = {
+    nagma: [], gi: ['unc', 'adequate', 'gi'], prta: ['unc', 'adequate', 'prta'], falsePosUnc: ['unc', 'adequate', 'fpunc'],
+    drta: ['unc', 'impaired', 'drta'], hyperK: ['unc', 'impaired', 'hyperk'],
+    voltage: ['unc', 'impaired', 'hyperk', 'voltage'], type4: ['unc', 'impaired', 'hyperk', 'type4'],
+  };
+
+  const TREE = {
+    id: 'ma', text: 'Metabolic acidosis', note: 'HCO3 < 22 mEq/L',
+    children: [{
+      id: 'winter', text: 'Check compensation', note: 'PaCO2 = 1.5 x HCO3 + 8 +/- 2',
+      children: [{
+        id: 'ag', text: 'Anion gap', note: 'Na - (Cl + HCO3), correct for albumin',
+        children: [
+          {
+            id: 'hagma', edge: 'AG > 14', text: 'High anion gap', note: 'Delta gap for coexisting disorder',
+            children: [
+              { id: 'lactic', edge: 'Lactate > 2', text: 'Lactic acidosis', note: 'Type A shock, type B drugs' },
+              { id: 'keto', edge: 'Ketone >= 3', text: 'Ketoacidosis', note: 'DKA, alcoholic, starvation' },
+              { id: 'renal', edge: 'GFR < 20', text: 'Kidney failure', note: 'AKI, advanced CKD' },
+              {
+                id: 'nonlk', edge: 'None of these', text: 'Serum osmolal gap',
+                children: [
+                  { id: 'toxic', edge: '> 25', text: 'Toxic alcohol', note: 'Methanol, ethylene glycol' },
+                  { id: 'othertox', edge: '<= 25', text: 'Other causes', note: 'Salicylate, toluene, pyroglutamate, D-lactate, cell lysis' },
+                ],
+              },
+            ],
+          },
+          {
+            id: 'nagma', edge: 'AG normal', text: 'Normal anion gap', note: 'Hyperchloremic',
+            children: [{
+              id: 'unc', text: 'Urine NH4+ excretion', note: 'UNC, UOG (while pH < 7.35)',
+              children: [
+                {
+                  id: 'adequate', edge: 'UNC neg / UOG >= 100', text: 'Adequate NH4+',
+                  children: [
+                    { id: 'gi', edge: 'Urine K low', text: 'GI HCO3 loss', note: 'Diarrhea, ostomy, fistula' },
+                    { id: 'prta', edge: 'FE HCO3 > 15%', text: 'Proximal RTA', note: 'Acetazolamide, tenofovir, myeloma' },
+                    { id: 'fpunc', edge: 'UNC pos, UOG >= 100', text: 'Unmeasured urine anion', note: 'Ketoacids, hippurate' },
+                  ],
+                },
+                {
+                  id: 'impaired', edge: 'UNC pos / UOG < 100', text: 'Low NH4+: distal RTA',
+                  children: [
+                    { id: 'drta', edge: 'K low or normal', text: 'Classical dRTA', note: 'Sjogren, lithium, toluene' },
+                    {
+                      id: 'hyperk', edge: 'K high', text: 'Hyperkalemic RTA',
+                      children: [
+                        { id: 'voltage', edge: 'Urine pH > 5.5', text: 'Voltage-dependent', note: 'Trimethoprim, amiloride, obstruction' },
+                        { id: 'type4', edge: 'Urine pH < 5.5', text: 'Type 4 RTA', note: 'Diabetes, RAAS blockers' },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            }],
+          },
+        ],
+      }],
+    }],
+  };
+
+  const ETIOLOGY = [
+    { group: 'High anion gap: gain of organic or retained acid' },
+    ['L-lactic acidosis, type A', 'Tissue hypoxia', 'Septic, hypovolemic or cardiogenic shock; severe hypoxemia; mesenteric ischemia; CO or cyanide poisoning'],
+    ['L-lactic acidosis, type B', 'No hypoperfusion', 'Metformin, NRTI, propofol, linezolid; thiamine deficiency; liver failure; malignancy; seizure'],
+    ['D-lactic acidosis', 'Colonic bacterial fermentation', 'Short bowel syndrome, jejunoileal bypass'],
+    ['Ketoacidosis', 'Ketone overproduction', 'DKA (including euglycemic DKA with SGLT2 inhibitor), alcoholic ketoacidosis, starvation'],
+    ['Kidney failure', 'Retained sulfate, phosphate, urate', 'Oliguric AKI, CKD with GFR < 20'],
+    ['Toxic alcohol (high osmolal gap)', 'Toxic acid metabolites', 'Methanol, ethylene glycol, propylene glycol, diethylene glycol'],
+    ['Other toxins (normal osmolal gap)', 'Exogenous or drug-related acid', 'Salicylate, toluene (early), pyroglutamic acid (paracetamol), iron, isoniazid'],
+    ['Cell lysis', 'Release of intracellular acid', 'Rhabdomyolysis, tumor lysis syndrome, hemolysis'],
+    { group: 'Normal anion gap: HCO3 loss or impaired renal acid excretion' },
+    ['GI HCO3 loss', 'Loss of alkaline fluid', 'Diarrhea, laxative, ileostomy, pancreatic or biliary fistula, ureteral diversion'],
+    ['Proximal RTA (type 2)', 'Low proximal HCO3 reabsorption', 'Acetazolamide, topiramate, tenofovir, ifosfamide, multiple myeloma, heavy metals, Fanconi syndrome'],
+    ['Classical or backleak dRTA (type 1)', 'Low distal H+ secretion', 'Sjogren, SLE, RA, lithium, amphotericin B, toluene, SE Asian ovalocytosis, hereditary'],
+    ['Voltage-dependent dRTA', 'Low ENaC lumen negativity, hyperkalemia', 'Amiloride, triamterene, trimethoprim, pentamidine, obstructive uropathy'],
+    ['Type 4 RTA', 'Hypo- or pseudohypoaldosteronism', 'Diabetic hyporeninemic hypoaldosteronism, ACEi/ARB/MRA, NSAID, CNI, heparin, adrenal insufficiency'],
+    ['Early CKD', 'Low ammoniagenesis', 'CKD with GFR 20-50'],
+    ['Acid load or dilution', 'Chloride-rich acid gain', 'Large-volume 0.9% saline, TPN (arginine or lysine HCl), NH4Cl, cholestyramine, toluene (late)'],
+  ];
 
   // ---------- UI ----------
 
@@ -147,6 +249,7 @@
       <div class="card">
         <h2>Metabolic acidosis</h2>
         <p class="muted">Nephrology</p>
+        <p>Primary fall in serum HCO3 (< 22 mEq/L) with pH < 7.35, or a hidden component found by the anion gap.</p>
         <form id="maForm">
           ${groups.map(groupHtml).join('')}
           <button type="submit" class="btn">Interpret</button>
@@ -154,6 +257,15 @@
         </form>
       </div>
       <div class="card" id="maResult" hidden></div>
+      <div class="card">
+        <h3 class="section-title">Approach</h3>
+        ${Tree.render(TREE)}
+        <p class="tree-legend">Highlighted boxes show the path for the values entered.</p>
+      </div>
+      <div class="card">
+        <h3 class="section-title">Etiology</h3>
+        ${Tree.table(['Category', 'Mechanism', 'Causes'], ETIOLOGY)}
+      </div>
       <details class="card">
         <summary>Formulas</summary>
         <pre class="ref">${UI.esc(FORMULAS)}</pre>
@@ -173,8 +285,12 @@
         if (dEl) dEl.open = true;
       });
       show(res);
+      Tree.highlight(el, res.path);
     });
-    form.addEventListener('reset', () => { document.getElementById('maResult').hidden = true; });
+    form.addEventListener('reset', () => {
+      document.getElementById('maResult').hidden = true;
+      Tree.highlight(el, new Set());
+    });
   }
 
   function show(res) {

@@ -1,6 +1,7 @@
 const routes = {
   abg: window.ABG,
   'metabolic-acidosis': window.MetabolicAcidosis,
+  dyskalemia: window.Dyskalemia,
 };
 
 function renderHome(el) {

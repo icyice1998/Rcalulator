@@ -55,6 +55,36 @@
       'Obesity hypoventilation syndrome', 'Severe asthma / pneumonia with fatigue'],
     respAlk: ['Sepsis', 'Pulmonary embolism', 'Pneumonia / pulmonary edema',
       'Pain / anxiety', 'Liver failure, pregnancy, salicylate'],
+    hypoGeneral: ['Diuretic (thiazide, loop)', 'Diarrhea', 'Vomiting / NG suction',
+      'Transcellular shift (insulin, beta-agonist)', 'Primary aldosteronism'],
+    hypoShift: ['Insulin therapy (e.g. DKA treatment)', 'Beta-2 agonist / catecholamine excess', 'Thyrotoxic periodic paralysis',
+      'Familial hypokalemic periodic paralysis', 'Refeeding syndrome'],
+    hypoIntake: ['Poor intake / malnutrition', 'Profuse sweating', 'Alcoholism', 'Unrecognized transcellular shift', 'Clay ingestion'],
+    hypoPolyuria: ['Osmotic diuresis (glucosuria, mannitol)', 'Post-obstructive or AKI recovery diuresis', 'Hypomagnesemia',
+      'Diuretic use', 'Amphotericin B / aminoglycoside'],
+    hypoAlkExtra: ['Remote diuretic use', 'Remote vomiting', 'Laxative abuse', 'Villous adenoma', 'Congenital chloridorrhea'],
+    activeVomit: ['Active vomiting / NG suction', 'Bulimia nervosa', 'Gastric outlet obstruction',
+      'High-dose penicillin (non-reabsorbable anion)', 'Post-hypercapnic alkalosis'],
+    nonAbsAnion: ['High-dose penicillin / carbenicillin', 'Toluene (hippurate)', 'Ketoacidosis (ketoanion)',
+      'Active vomiting (bicarbonaturia)', 'Other unmeasured urine anion'],
+    clRespRemote: ['Remote vomiting', 'Remote diuretic use', 'Post-hypercapnic alkalosis', 'Chloride-wasting diarrhea', 'Villous adenoma'],
+    laxative: ['Laxative abuse', 'Chloride-wasting diarrhea', 'Villous adenoma', 'Remote diuretic use', 'Poor intake'],
+    diureticBG: ['Current thiazide or loop diuretic', 'Gitelman syndrome', 'Bartter syndrome', 'Hypomagnesemia',
+      'Acquired tubulopathy (aminoglycoside, cisplatin)'],
+    hypoAcidRenal: ['Distal RTA (Sjogren, toluene)', 'Proximal RTA (acetazolamide, tenofovir)', 'DKA (osmotic diuresis, ketoanion)',
+      'Toluene (hippurate)', 'Amphotericin B'],
+    hyperGeneral: ['Pseudohyperkalemia', 'CKD / AKI', 'RAAS blocker or MRA', 'Diabetic hyporeninemic hypoaldosteronism',
+      'Cell lysis (rhabdomyolysis, TLS)'],
+    hyperPseudo: ['Hemolyzed sample', 'Fist clenching / tight tourniquet', 'Thrombocytosis',
+      'Leukocytosis (CLL, leukemia)', 'Delayed transport or refrigeration'],
+    hyperShift: ['Rhabdomyolysis / tissue injury', 'Tumor lysis syndrome', 'Insulin deficiency / hyperglycemia',
+      'Drugs (beta-blocker, digoxin, succinylcholine)', 'High K intake (supplement, salt substitute)'],
+    hyperRenalFail: ['Oliguric AKI', 'CKD with GFR < 20', 'Volume depletion (low distal flow)',
+      'Heart failure (low distal flow)', 'Urinary tract obstruction'],
+    hyperTubular: ['Diabetic hyporeninemic hypoaldosteronism', 'ACEi / ARB / MRA', 'Trimethoprim / amiloride',
+      'Obstructive uropathy', 'Primary adrenal insufficiency'],
+    hyperAldoDef: ['Diabetic hyporeninemic hypoaldosteronism', 'ACEi / ARB', 'NSAID', 'Heparin / LMWH', 'Primary adrenal insufficiency'],
+    hyperAldoRes: ['Trimethoprim', 'Spironolactone / eplerenone', 'Amiloride / triamterene', 'Calcineurin inhibitor', 'Obstructive uropathy'],
     hypoxWide: ['Pneumonia', 'ARDS', 'Cardiogenic pulmonary edema', 'Pulmonary embolism', 'COPD / asthma (V/Q mismatch)'],
     hypoxNormal: ['Opioid / sedative overdose', 'Neuromuscular weakness', 'Obesity hypoventilation',
       'High altitude (low PiO2)', 'Brainstem lesion / chest wall disease'],
@@ -75,6 +105,7 @@
     if (!has(v.una, v.uk, v.ucl)) {
       lines.push('Enter urine Na, K, Cl (spot urine taken while pH < 7.35) to evaluate renal NH4+ excretion');
       res.missing = true;
+      res.key = 'nagma';
       lines.push(...ddx('nagma'));
       return res;
     }
@@ -160,6 +191,7 @@
         if (!impaired) key = 'prta';
       }
     }
+    res.key = key;
     lines.push(...ddx(key));
     return res;
   }
@@ -221,6 +253,7 @@
         : explained.includes('ketone') ? 'keto'
           : explained.includes('renal') ? 'renal'
             : entered ? 'nonLK' : 'hagma';
+    res.key = key;
     lines.push(...ddx(key));
     return res;
   }
