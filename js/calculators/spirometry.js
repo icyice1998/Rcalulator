@@ -33,10 +33,17 @@
     return { lines: out, tested: a !== null || b !== null, positive: a === true || b === true };
   }
 
-  function interpret(v) {
+  function interpret(input) {
+    const v = { ...input };
     const sections = [];
     const path = new Set(['sp']);
     const warnings = [];
+    if (!has(v.ratio) && has(v.fev1Pre, v.fvcPre) && v.fvcPre > 0) {
+      v.ratio = Math.round(v.fev1Pre / v.fvcPre * 100) / 100;
+      v.ratioCalc = true;
+    }
+    if (!has(v.age, v.ratio, v.fev1, v.fvc))
+      return { path, warnings, summary: 'Enter age, FEV1 and FVC % predicted, and FEV1/FVC (or FEV1 and FVC litres)', sections: [] };
     const cut = v.age > 40 ? 0.70 : 0.75;
 
     // 1. Quality
@@ -48,8 +55,8 @@
     sections.push({ title: '1  Quality', lines: qLines, flag: !(v.acceptable && v.repeatable) });
 
     // 2. Pattern
-    const pLines = [`FEV1/FVC ${v.ratio}: ${v.ratio < cut ? 'low' : 'normal'} (cut-off ${cut.toFixed(2)} for age ${v.age > 40 ? '> 40' : '<= 40'})`,
-      `FEV1 ${v.fev1}% pred, FVC ${v.fvc}% pred, FEF25-75 ${v.fef}% pred`];
+    const pLines = [`FEV1/FVC ${v.ratio}${v.ratioCalc ? ' (calculated)' : ''}: ${v.ratio < cut ? 'low' : 'normal'} (cut-off ${cut.toFixed(2)} for age ${v.age > 40 ? '> 40' : '<= 40'})`,
+      `FEV1 ${v.fev1}% pred, FVC ${v.fvc}% pred` + (has(v.fef) ? `, FEF25-75 ${v.fef}% pred` : '')];
     let pattern, key;
     const fvcLow = v.fvc < 80;
     const bdr = bronchodilator(v);
@@ -75,8 +82,12 @@
         else { path.add('mixed2'); pattern = 'mixed'; }
       } else {
         path.add('fvcNorm');
-        if (v.fef < 65) { path.add('sad'); pattern = 'sad'; }
-        else { path.add('normal'); pattern = 'normal'; }
+        if (has(v.fef) && v.fef < 65) { path.add('sad'); pattern = 'sad'; }
+        else {
+          pattern = 'normal';
+          if (has(v.fef)) path.add('normal');
+          else pLines.push('Enter FEF25-75% to check small airways');
+        }
       }
     }
 
@@ -237,24 +248,20 @@
 
   // ---------- UI ----------
 
-  const SLIDERS = [
-    { id: 'age',   label: 'Age', unit: 'years', min: 10, max: 95, step: 1, value: 55 },
-    { id: 'ratio', label: 'FEV1/FVC', unit: 'ratio', min: 0.2, max: 1, step: 0.01, value: 0.36 },
-    { id: 'fev1',  label: 'FEV1', unit: '% pred', min: 10, max: 150, step: 1, value: 32 },
-    { id: 'fvc',   label: 'FVC', unit: '% pred', min: 10, max: 150, step: 1, value: 69 },
-    { id: 'fef',   label: 'FEF25-75%', unit: '% pred', min: 5, max: 200, step: 1, value: 10 },
+  // Report-style grid: [row label, [pre L, pre %pred, post L, post %pred] field ids]
+  const GRID = [
+    ['FVC', ['fvcPre', 'fvc', 'fvcPost', null], 'L'],
+    ['FEV1', ['fev1Pre', 'fev1', 'fev1Post', 'fev1PostPct'], 'L'],
+    ['FEV1/FVC', ['ratio', null, null, null], 'ratio'],
+    ['FEF25-75%', [null, 'fef', null, null], ''],
+    ['PEF', [null, 'pef', null, null], ''],
   ];
-  const BOXES = [
-    { id: 'fev1Pre', label: 'FEV1 pre', unit: 'L', step: '0.01' },
-    { id: 'fev1Post', label: 'FEV1 post', unit: 'L', step: '0.01' },
-    { id: 'fvcPre', label: 'FVC pre', unit: 'L', step: '0.01' },
-    { id: 'fvcPost', label: 'FVC post', unit: 'L', step: '0.01' },
-    { id: 'fev1PostPct', label: 'FEV1 post', unit: '% pred', step: '1' },
-    { id: 'pef', label: 'PEF', unit: '% pred', step: '1' },
-    { id: 'fefFif', label: 'FEF50/FIF50', unit: '', step: '0.01' },
-    { id: 'loop', label: 'Flow-volume loop', type: 'select', options: Object.entries(LOOPS).map(([k, l]) => [k, l.label]) },
-  ];
-  const EXAMPLE = { fev1Pre: 0.96, fev1Post: 0.97, fvcPre: 2.66, fvcPost: 2.62, fev1PostPct: 32, pef: 45, loop: 'scooped' };
+  const IDS = ['age', 'fefFif', ...GRID.flatMap(r => r[1].filter(Boolean))];
+  const EXAMPLE = { age: 55, fvcPre: 2.66, fvc: 69, fvcPost: 2.62, fev1Pre: 0.96, fev1: 32, fev1Post: 0.97, fev1PostPct: 32,
+    ratio: 0.36, fef: 10, pef: 45, loop: 'scooped' };
+
+  const cell = id => id
+    ? `<td><input type="number" id="${id}" step="0.01" inputmode="decimal" aria-label="${id}"></td>` : '<td class="na">-</td>';
 
   function render(el) {
     const t2 = rows => `<div class="table-wrap"><table class="etio"><tbody>${rows.map(([a, b]) =>
@@ -271,9 +278,21 @@
                 <label for="repeatable"><input type="checkbox" id="repeatable" checked> FVC and FEV1 within 150 mL</label>
               </div>
             </fieldset>
-            <fieldset><legend>Pre-bronchodilator</legend>${SLIDERS.map(UI.sliderField).join('')}</fieldset>
-            <fieldset><legend>Bronchodilator response and loop</legend>
-              <div class="form-grid">${BOXES.map(UI.fieldHtml).join('')}</div></fieldset>
+            <div class="pft-top">
+              <label for="age">Age <input type="number" id="age" step="1" inputmode="numeric"></label>
+              <label for="loop">Loop
+                <select id="loop">${Object.entries(LOOPS).map(([k, l]) => `<option value="${k}">${l.label}</option>`).join('')}</select>
+              </label>
+              <label for="fefFif">FEF50/FIF50 <input type="number" id="fefFif" step="0.01" inputmode="decimal"></label>
+            </div>
+            <div class="table-wrap">
+              <table class="pft-table">
+                <thead><tr><th></th><th>Pre</th><th>%Pred</th><th>Post</th><th>%Pred</th></tr></thead>
+                <tbody>${GRID.map(([label, ids]) => `<tr><th>${label}</th>${ids.map(cell).join('')}</tr>`).join('')}</tbody>
+              </table>
+            </div>
+            <p class="muted small">Required: age, FEV1 and FVC %Pred, FEV1/FVC (left blank, it is calculated from Pre litres).
+              Post values give the bronchodilator response.</p>
             <p class="muted small" id="exampleNote">Example loaded: lecture case 2 (COPD). Replace with your patient's values.</p>
             <button type="reset" class="btn secondary">Clear</button>
           </form>
@@ -299,15 +318,19 @@
 
     const form = el.querySelector('#spForm');
     Object.entries(EXAMPLE).forEach(([id, val]) => { el.querySelector('#' + id).value = val; });
-    const update = () => show(el, interpret(readInputs(el)));
-    UI.bindSliders(el, SLIDERS, update);
-    form.addEventListener('input', e => { if (!e.target.id.endsWith('-range')) update(); });
+    const update = () => {
+      const v = readInputs(el);
+      el.querySelector('#ratio').placeholder = has(v.fev1Pre, v.fvcPre) && v.fvcPre > 0
+        ? (v.fev1Pre / v.fvcPre).toFixed(2) : '';
+      show(el, interpret(v));
+    };
+    form.addEventListener('input', update);
     form.addEventListener('change', update);
     form.addEventListener('submit', e => e.preventDefault());
     form.addEventListener('reset', e => {
       e.preventDefault();
-      BOXES.forEach(f => { el.querySelector('#' + f.id).value = f.type === 'select' ? 'normal' : ''; });
-      UI.resetSliders(el, SLIDERS.map(f => ({ ...f, value: { age: 50, ratio: 0.8, fev1: 95, fvc: 95, fef: 90 }[f.id] })));
+      IDS.forEach(id => { el.querySelector('#' + id).value = ''; });
+      el.querySelector('#loop').value = 'normal';
       el.querySelector('#exampleNote').hidden = true;
       update();
     });
@@ -316,14 +339,11 @@
 
   function readInputs(el) {
     const v = {};
-    SLIDERS.forEach(f => {
-      const raw = el.querySelector('#' + f.id).value, n = Number(raw);
-      v[f.id] = raw === '' || Number.isNaN(n) ? f.value : n;
+    IDS.forEach(id => {
+      const raw = el.querySelector('#' + id).value;
+      v[id] = raw === '' ? null : Number(raw);
     });
-    BOXES.forEach(f => {
-      const raw = el.querySelector('#' + f.id).value;
-      v[f.id] = f.type === 'select' ? raw : raw === '' ? null : Number(raw);
-    });
+    v.loop = el.querySelector('#loop').value;
     v.acceptable = el.querySelector('#acceptable').checked;
     v.repeatable = el.querySelector('#repeatable').checked;
     return v;

@@ -248,3 +248,26 @@ table.etio tr.grp th { background: color-mix(in srgb, var(--accent) 10%, var(--s
 fieldset[hidden] { display: none !important; }
 .content { min-width: 0; }
 .page-grid > *, .abg-grid > * { min-width: 0; }
+
+/* Compact PFT report grid */
+.pft-top { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-bottom: 10px; font-size: 0.85rem; }
+.pft-top label { display: flex; align-items: center; gap: 6px; }
+.pft-top input { width: 64px; }
+.pft-top select { width: auto; max-width: 210px; }
+.pft-top input, .pft-top select, .pft-table input {
+  padding: 4px 6px; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg); color: var(--text); font: inherit; font-size: 0.85rem;
+}
+.pft-table { border-collapse: collapse; font-size: 0.85rem; }
+.pft-table th, .pft-table td { padding: 3px 4px; text-align: center; }
+.pft-table thead th { color: var(--muted); font-weight: 600; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.pft-table tbody th { text-align: left; padding-right: 8px; white-space: nowrap; }
+.pft-table input { width: 64px; text-align: right; }
+.pft-table td.na { color: var(--muted); }
+.pft-table input::-webkit-outer-spin-button, .pft-table input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.pft-table input[type=number] { -moz-appearance: textfield; appearance: textfield; }
+@media (max-width: 480px) {
+  .pft-table input { width: 50px; padding: 4px; }
+  .pft-table th, .pft-table td { padding: 3px 2px; }
+  .pft-table tbody th { padding-right: 4px; font-size: 0.78rem; }
+}
