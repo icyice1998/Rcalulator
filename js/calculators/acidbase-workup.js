@@ -33,6 +33,8 @@
       'Pentamidine', 'Lithium'],
     type4: ['Diabetic hyporeninemic hypoaldosteronism', 'ACEi / ARB / spironolactone',
       'NSAID / calcineurin inhibitor', 'Heparin / LMWH', 'Primary adrenal insufficiency'],
+    metAcid: ['Lactic acidosis (sepsis, shock)', 'Diabetic ketoacidosis', 'Kidney failure',
+      'Diarrhea', 'Toxic ingestion (methanol, ethylene glycol, salicylate)'],
     metAlk: ['Vomiting / NG suction', 'Diuretic use', 'Primary aldosteronism',
       'Post-hypercapnic alkalosis', 'Exogenous alkali (NaHCO3, citrate, transfusion)'],
     clResp: ['Vomiting / NG suction', 'Remote diuretic use', 'Post-hypercapnic alkalosis',

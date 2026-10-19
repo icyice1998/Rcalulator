@@ -179,3 +179,15 @@ details.sub {
   margin-bottom: 12px;
 }
 details.sub[open] summary { margin-bottom: 10px; }
+
+.abg-grid { display: grid; gap: 16px; }
+@media (min-width: 1000px) {
+  .abg-grid { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); align-items: start; }
+  .abg-grid .result { position: sticky; top: 16px; }
+}
+.content:has(.abg-grid) { max-width: 1200px; }
+.slider-field { margin-bottom: 12px; }
+.dual { display: grid; grid-template-columns: minmax(0, 1fr) 96px; gap: 12px; align-items: center; }
+.dual input[type="range"] { width: 100%; accent-color: var(--accent); }
+.summary { margin: 0 0 12px; padding-left: 20px; font-weight: 600; display: grid; gap: 4px; }
+.result h3 { margin-top: 0; }

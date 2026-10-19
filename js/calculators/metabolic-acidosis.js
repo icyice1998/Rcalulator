@@ -1,12 +1,50 @@
 // Metabolic acidosis: anion gap classification and second-tier workup
 (function () {
-  const ABG = typeof window !== 'undefined' && window.ABG ? window.ABG : require('./abg.js');
+  const UI = typeof window !== 'undefined' && window.UI ? window.UI : require('../ui.js');
   const Workup = typeof window !== 'undefined' && window.AcidBaseWorkup
     ? window.AcidBaseWorkup : require('./acidbase-workup.js');
 
   const r1 = x => Math.round(x * 10) / 10;
   const r2 = x => Math.round(x * 100) / 100;
   const has = (...xs) => xs.every(x => x !== null && x !== undefined && !Number.isNaN(x));
+
+  function anionGap(v) {
+    const ag = v.na - (v.cl + v.hco3);
+    const corr = has(v.alb) ? ag + 2.5 * (4 - v.alb) : null;
+    const used = corr ?? ag;
+    const normalAg = has(v.normalAg) ? v.normalAg : 12;
+    const res = { ag, corr, used, normalAg, high: used > normalAg + 2 };
+    if (has(v.alb, v.phos)) res.expectedAg = 2 * v.alb + 0.5 * v.phos;
+    if (!res.high) return res;
+
+    const dAG = used - normalAg, dH = 24 - v.hco3;
+    const d = { diff: dAG - dH };
+    if (dH > 0) {
+      d.ratio = dAG / dH;
+      d.ratioNote = d.ratio < 0.4 ? 'normal-AG acidosis predominates'
+        : d.ratio < 0.8 ? 'high-AG + normal-AG metabolic acidosis'
+          : d.ratio <= 1.2 ? 'pure high-AG metabolic acidosis'
+            : d.ratio <= 2 ? 'borderline (pure range 0.8-1.6/2 in some texts) - check delta difference'
+              : 'high-AG acidosis + metabolic alkalosis';
+    }
+    const band = x => x < -5 ? 'nagma' : x > 5 ? 'alk' : 'pure';
+    if (has(v.lactate) && v.lactate > 2) {
+      d.lactDiff = 0.6 * dAG - dH;
+      d.final = band(d.lactDiff);
+      d.finalBasis = 'lactate-adjusted delta difference';
+    } else {
+      d.final = band(d.diff);
+      d.finalBasis = 'delta difference';
+    }
+    res.delta = d;
+    return res;
+  }
+
+  const FINAL_TEXT = {
+    pure: 'Pure high-AG metabolic acidosis',
+    nagma: 'High-AG + normal-AG metabolic acidosis',
+    alk: 'High-AG metabolic acidosis + metabolic alkalosis',
+  };
 
   const FIELDS = [
     { group: 'Serum', id: 'hco3', label: 'HCO3-', unit: 'mEq/L', step: '0.1' },
@@ -61,7 +99,7 @@
     }
 
     // 2. Anion gap and delta
-    const ag = ABG.anionGap(v);
+    const ag = anionGap(v);
     const lines = [`AG = Na - (Cl + HCO3) = ${r1(ag.ag)} mEq/L`];
     if (ag.corr !== null) lines.push(`Albumin-corrected AG = AG + 2.5 x (4 - albumin) = ${r1(ag.corr)} mEq/L`);
     if (ag.expectedAg !== undefined) lines.push(`Expected normal AG = 2 x albumin + 0.5 x phosphate = ${r1(ag.expectedAg)} mEq/L`);
@@ -72,7 +110,7 @@
       if (d.ratio !== undefined) lines.push(`Delta ratio = (AG - ${ag.normalAg}) / (24 - HCO3) = ${r2(d.ratio)}: ${d.ratioNote}`);
       lines.push(`Delta difference = (AG - ${ag.normalAg}) - (24 - HCO3) = ${r1(d.diff)} (-5 to +5 pure)`);
       if (d.lactDiff !== undefined) lines.push(`Lactic acidosis: 0.6 x dAG - dHCO3 = ${r1(d.lactDiff)}`);
-      lines.push(`Conclusion (${d.finalBasis}): ${ABG.FINAL_TEXT[d.final]}`);
+      lines.push(`Conclusion (${d.finalBasis}): ${FINAL_TEXT[d.final]}`);
     }
     out.steps.push({ title: '2  Anion gap and delta gap', lines, flag: true });
 
@@ -85,7 +123,7 @@
         out.steps.push({ title: '3  Coexisting normal-AG metabolic acidosis', ...Workup.nagma(v) });
       }
       if (d && d.final === 'alk') out.steps.push({ title: '3  Coexisting metabolic alkalosis', lines: [
-        'Evaluate with urine Cl and BP on the ABG interpretation page (metabolic alkalosis workup)'] });
+        'Check urine Cl and blood pressure (metabolic alkalosis workup)'] });
     } else if (v.hco3 < 22) {
       out.workups.push('urine');
       out.steps.push({ title: '3  Normal-AG metabolic acidosis', ...Workup.nagma(v) });
@@ -97,7 +135,7 @@
 
   function groupHtml(g) {
     const fs = FIELDS.filter(f => f.group === g);
-    const grid = `<div class="form-grid">${fs.map(ABG.ui.fieldHtml).join('')}</div>`;
+    const grid = `<div class="form-grid">${fs.map(UI.fieldHtml).join('')}</div>`;
     return fs[0].key
       ? `<details class="sub" data-key="${fs[0].key}"><summary>${g}</summary>${grid}</details>`
       : `<fieldset><legend>${g}</legend>${grid}</fieldset>`;
@@ -118,7 +156,7 @@
       <div class="card" id="maResult" hidden></div>
       <details class="card">
         <summary>Formulas</summary>
-        <pre class="ref">${ABG.ui.esc(FORMULAS)}</pre>
+        <pre class="ref">${UI.esc(FORMULAS)}</pre>
       </details>`;
 
     const form = el.querySelector('#maForm');
@@ -140,7 +178,7 @@
   }
 
   function show(res) {
-    const esc = ABG.ui.esc;
+    const esc = UI.esc;
     const out = document.getElementById('maResult');
     out.hidden = false;
     out.innerHTML = `
