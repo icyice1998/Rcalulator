@@ -634,7 +634,8 @@ Metabolic alkalosis
 `);
   }
 
-  const api = { render, interpret, consistency, detectPrimary, compensation, anionGap, oxygenation, ventilation, baseExcess };
+  const api = { render, interpret, consistency, detectPrimary, compensation, anionGap, oxygenation, ventilation, baseExcess,
+    FINAL_TEXT, ui: { fieldHtml, esc } };
   if (typeof window !== 'undefined') window.ABG = api;
   if (typeof module !== 'undefined') module.exports = api;
 })();
