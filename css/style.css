@@ -9,7 +9,7 @@
   --sidebar-w: 240px;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #12161b;
     --surface: #1c2229;
     --text: #e4e7eb;
@@ -17,7 +17,18 @@
     --border: #323f4b;
     --accent: #4fb3e0;
     --flag: #fb923c;
+    color-scheme: dark;
   }
+}
+:root[data-theme="dark"] {
+  --bg: #12161b;
+  --surface: #1c2229;
+  --text: #e4e7eb;
+  --muted: #9aa5b1;
+  --border: #323f4b;
+  --accent: #4fb3e0;
+  --flag: #fb923c;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
