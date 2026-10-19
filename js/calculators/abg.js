@@ -1,5 +1,8 @@
 // ABG interpretation — stepwise physiological approach
 (function () {
+  const Workup = typeof window !== 'undefined' && window.AcidBaseWorkup
+    ? window.AcidBaseWorkup : require('./acidbase-workup.js');
+
   const NORMAL = { ph: 7.40, paco2: 40, hco3: 24, alb: 4.0 };
   const RANGE = {
     phLow: 7.35, phHigh: 7.45,
@@ -71,7 +74,9 @@
     if (type === 'metAcidosis') {
       const c = COMP.metAcidosis, exp = 1.5 * v.hco3 + 8;
       return [{ formula: c.text, param: 'PaCO2', actual: v.paco2,
-        ...verdict(v.paco2, exp, c.tol, 'Concomitant respiratory acidosis', 'Concomitant respiratory alkalosis') }];
+        ...verdict(v.paco2, exp, c.tol,
+          'Concomitant respiratory acidosis (CNS depression / toxin, lung disease)',
+          'Concomitant respiratory alkalosis (salicylate, sepsis)') }];
     }
     if (type === 'metAlkalosis') {
       const c = COMP.metAlkalosis, exp = 40 + 0.7 * (v.hco3 - NORMAL.hco3);
@@ -231,6 +236,27 @@
       out.steps.push({ title: 'Step 6  Oxygenation', lines, flag: ox.pf <= 300 || ox.aaHigh });
     }
 
+    // Step 7: second-tier workup
+    out.workups = [];
+    const metAcid = primary.list.includes('metAcidosis') || v.hco3 < RANGE.hco3Low;
+    if (ag && ag.high) {
+      out.workups.push('hagma');
+      out.steps.push({ title: 'Step 7  Further workup: High-AG metabolic acidosis', ...Workup.hagma(v) });
+      if (ag.delta && ag.delta.ratio !== null && ag.delta.ratio < 0.8) {
+        out.workups.push('urine');
+        out.steps.push({ title: 'Step 7  Further workup: coexisting normal-AG acidosis', ...Workup.nagma(v) });
+      }
+    } else if (ag && metAcid) {
+      out.workups.push('urine');
+      out.steps.push({ title: 'Step 7  Further workup: Normal-AG metabolic acidosis', ...Workup.nagma(v) });
+    } else if (!ag && metAcid) {
+      out.steps.push({ title: 'Step 7  Further workup', lines: ['Enter Na and Cl to classify metabolic acidosis as high-AG or normal-AG'], muted: true });
+    }
+    if (primary.list.includes('metAlkalosis') || (ag && ag.delta && ag.delta.ratio > 2)) {
+      out.workups.push('urine', 'alk');
+      out.steps.push({ title: 'Step 7  Further workup: Metabolic alkalosis', ...Workup.metAlkalosis(v) });
+    }
+
     return out;
   }
 
@@ -241,6 +267,7 @@
     { group: 'Blood gas', id: 'paco2', label: 'PaCO2', unit: 'mmHg',  step: '0.1' },
     { group: 'Blood gas', id: 'hco3',  label: 'HCO3-', unit: 'mEq/L', step: '0.1' },
     { group: 'Electrolytes', id: 'na',  label: 'Na+',     unit: 'mEq/L', step: '0.1' },
+    { group: 'Electrolytes', id: 'k',   label: 'K+',      unit: 'mEq/L', step: '0.1' },
     { group: 'Electrolytes', id: 'cl',  label: 'Cl-',     unit: 'mEq/L', step: '0.1' },
     { group: 'Electrolytes', id: 'alb', label: 'Albumin', unit: 'g/dL',  step: '0.1' },
     { group: 'Electrolytes', id: 'normalAg', label: 'Lab normal AG', unit: 'mEq/L', step: '1', placeholder: '12' },
@@ -248,7 +275,50 @@
     { group: 'Oxygenation', id: 'fio2', label: 'FiO2', unit: '% or fraction', step: '0.01' },
     { group: 'Oxygenation', id: 'age',  label: 'Age',  unit: 'years', step: '1' },
     { group: 'Oxygenation', id: 'patm', label: 'Patm', unit: 'mmHg', step: '1', placeholder: '760' },
+
+    { group: 'Urine studies', key: 'urine', id: 'una',   label: 'Urine Na',   unit: 'mEq/L', step: '1' },
+    { group: 'Urine studies', key: 'urine', id: 'uk',    label: 'Urine K',    unit: 'mEq/L', step: '1' },
+    { group: 'Urine studies', key: 'urine', id: 'ucl',   label: 'Urine Cl',   unit: 'mEq/L', step: '1' },
+    { group: 'Urine studies', key: 'urine', id: 'uph',   label: 'Urine pH',   unit: '',      step: '0.1' },
+    { group: 'Urine studies', key: 'urine', id: 'uosm',  label: 'Urine osm',  unit: 'mOsm/kg', step: '1' },
+    { group: 'Urine studies', key: 'urine', id: 'uurea', label: 'Urine urea', unit: 'mg/dL', step: '1' },
+    { group: 'Urine studies', key: 'urine', id: 'uglu',  label: 'Urine glucose', unit: 'mg/dL', step: '1' },
+    { group: 'Urine studies', key: 'urine', id: 'uhco3', label: 'Urine HCO3', unit: 'mEq/L', step: '0.1' },
+    { group: 'Urine studies', key: 'urine', id: 'ucr',   label: 'Urine Cr',   unit: 'mg/dL', step: '0.1' },
+    { group: 'Urine studies', key: 'urine', id: 'scr',   label: 'Serum Cr',   unit: 'mg/dL', step: '0.01' },
+
+    { group: 'HAGMA workup', key: 'hagma', id: 'lactate', label: 'Lactate', unit: 'mmol/L', step: '0.1' },
+    { group: 'HAGMA workup', key: 'hagma', id: 'ketone',  label: 'Ketone (beta-OHB)', unit: 'mmol/L', step: '0.1' },
+    { group: 'HAGMA workup', key: 'hagma', id: 'egfr',    label: 'eGFR', unit: 'mL/min/1.73m2', step: '1' },
+    { group: 'HAGMA workup', key: 'hagma', id: 'sosm',    label: 'Measured serum osm', unit: 'mOsm/kg', step: '1' },
+    { group: 'HAGMA workup', key: 'hagma', id: 'bun',     label: 'BUN', unit: 'mg/dL', step: '1' },
+    { group: 'HAGMA workup', key: 'hagma', id: 'glu',     label: 'Glucose', unit: 'mg/dL', step: '1' },
+
+    { group: 'Metabolic alkalosis workup', key: 'alk', id: 'bp', label: 'BP / volume', type: 'select',
+      options: [['', 'Not specified'], ['high', 'Hypertension'], ['low', 'Normotension / hypotension']] },
+    { group: 'Metabolic alkalosis workup', key: 'alk', id: 'pac',   label: 'PAC', unit: 'ng/dL', step: '0.1' },
+    { group: 'Metabolic alkalosis workup', key: 'alk', id: 'pra',   label: 'PRA', unit: 'ng/mL/h', step: '0.01' },
+    { group: 'Metabolic alkalosis workup', key: 'alk', id: 'ucacr', label: 'Urine Ca/Cr', unit: 'mg/mg', step: '0.01' },
   ];
+
+  function fieldHtml(f) {
+    const input = f.type === 'select'
+      ? `<select id="${f.id}">${f.options.map(([val, l]) => `<option value="${val}">${l}</option>`).join('')}</select>`
+      : `<input type="number" id="${f.id}" step="${f.step}" inputmode="decimal" placeholder="${f.placeholder || ''}">`;
+    return `
+      <div class="field">
+        <label for="${f.id}">${f.label} <span class="unit">${f.unit || ''}</span></label>
+        ${input}
+      </div>`;
+  }
+
+  function groupHtml(g) {
+    const fs = FIELDS.filter(f => f.group === g);
+    const grid = `<div class="form-grid">${fs.map(fieldHtml).join('')}</div>`;
+    return fs[0].key
+      ? `<details class="sub" data-key="${fs[0].key}"><summary>${g}</summary>${grid}</details>`
+      : `<fieldset><legend>${g}</legend>${grid}</fieldset>`;
+  }
 
   function render(el) {
     const groups = [...new Set(FIELDS.map(f => f.group))];
@@ -276,17 +346,7 @@
               </div>
             </div>
           </fieldset>
-          ${groups.map(g => `
-            <fieldset>
-              <legend>${g}</legend>
-              <div class="form-grid">
-                ${FIELDS.filter(f => f.group === g).map(f => `
-                  <div class="field">
-                    <label for="${f.id}">${f.label} <span class="unit">${f.unit}</span></label>
-                    <input type="number" id="${f.id}" step="${f.step}" inputmode="decimal" placeholder="${f.placeholder || ''}">
-                  </div>`).join('')}
-              </div>
-            </fieldset>`).join('')}
+          ${groups.map(groupHtml).join('')}
           <button type="submit" class="btn">Interpret</button>
           <button type="reset" class="btn secondary">Clear</button>
         </form>
@@ -300,7 +360,12 @@
     const form = el.querySelector('#abgForm');
     form.addEventListener('submit', e => {
       e.preventDefault();
-      showResult(interpret(readInputs(el)));
+      const res = interpret(readInputs(el));
+      (res.workups || []).forEach(k => {
+        const d = el.querySelector(`details[data-key="${k}"]`);
+        if (d) d.open = true;
+      });
+      showResult(res);
     });
     form.addEventListener('reset', () => {
       document.getElementById('abgResult').hidden = true;
@@ -311,7 +376,7 @@
     const v = {};
     FIELDS.forEach(f => {
       const raw = el.querySelector('#' + f.id).value;
-      v[f.id] = raw === '' ? null : Number(raw);
+      v[f.id] = f.type === 'select' ? raw : raw === '' ? null : Number(raw);
     });
     v.selected = el.querySelector('#selected').value;
     v.chronicity = el.querySelector('#chronicity').value;
@@ -370,7 +435,36 @@ Oxygenation
   PAO2 = FiO2 x (Patm - 47) - PaCO2 / 0.8
   A-a gradient = PAO2 - PaO2 ; expected (room air) <= age/4 + 4
 
+Normal-AG metabolic acidosis (spot urine while pH < 7.35)
+  UNC = (UNa + UK) - UCl          negative: GI loss / pRTA ; positive: impaired NH4+
+  Calc Uosm = 2(UNa + UK) + Uurea/2.8 + Uglucose/18
+  UOG = measured - calculated Uosm   < 100 impaired NH4+ ; >= 100 adequate
+    UNC and UOG disagree -> rely on UOG
+  Impaired NH4+:  K low/normal          -> classical / backleak dRTA
+                  K high + UpH > 5.5    -> voltage-dependent dRTA
+                  K high + UpH < 5.5    -> type 4 RTA
+  FE HCO3 = (UHCO3 x SCr)/(SHCO3 x UCr) x 100   > 15% pRTA ; < 5% normal
+  Limitations: UNa < 25, unmeasured anions, bicarbonaturia (UpH > 7.5), GFR < 20
+
+High-AG metabolic acidosis
+  L-lactate -> ketone -> renal insufficiency -> D-lactate -> toxin
+  Calc Sosm = 2Na + BUN/2.8 + Glucose/18
+  Serum OG = measured - calculated   > 10 elevated ; > 20-25 toxic alcohol
+  High OG: methanol, ethylene glycol, propylene glycol
+  Normal OG: salicylate, hippurate (toluene), pyroglutamate
+
+Metabolic alkalosis
+  Exclude exogenous alkali
+  UCl < 20                -> extra-renal salt loss (vomiting, NG, remote diuretic)
+  UCl >= 20 + HT          -> mineralocorticoid excess -> PAC / PRA
+  UCl >= 20 + normo/hypoT -> renal salt loss (diuretic, Bartter, Gitelman)
+  Urine Ca/Cr > 0.2 Bartter-like ; < 0.07 Gitelman-like (mg/mg)
+  Primary aldosteronism: PAC >= 10 ng/dL, PRA <= 1 ng/mL/h, ARR > 20
+
 Sources
+  Nata N. Case-based approach of normal anion gap metabolic acidosis.
+    Nephrology Division, Phramongkutklao Hospital (lecture).
+  Khemmongkon M. Electrolyte and acid-base disorders 2026 (lecture).
   Berend K, de Vries AP, Gans RO. Physiological approach to assessment of
     acid-base disturbances. N Engl J Med 2014;371:1434-45.
   Seifter JL. Integration of acid-base and electrolyte disorders.
@@ -379,7 +473,15 @@ Sources
     clinical medicine. Clin J Am Soc Nephrol 2007;2:162-74.
   Figge J, et al. Anion gap and hypoalbuminemia. Crit Care Med 1998;26:1807-10.
   ARDS Definition Task Force. Acute respiratory distress syndrome:
-    the Berlin Definition. JAMA 2012;307:2526-33.`);
+    the Berlin Definition. JAMA 2012;307:2526-33.
+  Batlle DC, et al. The use of the urinary anion gap in the diagnosis of
+    hyperchloremic metabolic acidosis. N Engl J Med 1988;318:594-9.
+  Kraut JA, Madias NE. Differential diagnosis of nongap metabolic acidosis:
+    value of a systematic approach. Clin J Am Soc Nephrol 2012;7:671-9.
+  Kraut JA, Kurtz I. Toxic alcohol ingestions: clinical features, diagnosis,
+    and management. Clin J Am Soc Nephrol 2008;3:208-25.
+  Funder JW, et al. Management of primary aldosteronism: Endocrine Society
+    clinical practice guideline. J Clin Endocrinol Metab 2016;101:1889-916.`);
   }
 
   const api = { render, interpret, consistency, detectPrimary, compensation, anionGap, oxygenation };

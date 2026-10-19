@@ -161,3 +161,10 @@ legend { font-weight: 600; margin-bottom: 8px; }
 .small { font-size: 0.8rem; }
 details summary { cursor: pointer; font-weight: 600; }
 details[open] summary { margin-bottom: 12px; }
+details.sub {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+details.sub[open] summary { margin-bottom: 10px; }
