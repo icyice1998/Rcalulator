@@ -504,7 +504,7 @@
       </div>
       <div class="card" id="abgResult" hidden></div>
       <details class="card">
-        <summary>Formulas and references</summary>
+        <summary>Formulas</summary>
         <pre class="ref">${referenceText()}</pre>
       </details>`;
 
@@ -631,32 +631,7 @@ Metabolic alkalosis
   UCl >= 20 + normo/hypoT -> renal salt loss (diuretic, Bartter, Gitelman)
   Urine Ca/Cr > 0.2 Bartter-like ; < 0.07 Gitelman-like (mg/mg)
   Primary aldosteronism: PAC >= 10 ng/dL, PRA <= 1 ng/mL/h, ARR > 20
-
-Sources
-  Poompichet A. Arterial blood gas interpretation. Division of Critical Care
-    Medicine, Siriraj Hospital (lecture).
-  Nata N. Case-based approach of normal anion gap metabolic acidosis.
-    Nephrology Division, Phramongkutklao Hospital (lecture).
-  Khemmongkon M. Electrolyte and acid-base disorders 2026 (lecture).
-  Berend K, de Vries AP, Gans RO. Physiological approach to assessment of
-    acid-base disturbances. N Engl J Med 2014;371:1434-45.
-  Seifter JL. Integration of acid-base and electrolyte disorders.
-    N Engl J Med 2014;371:1821-31.
-  Kraut JA, Madias NE. Serum anion gap: its uses and limitations in
-    clinical medicine. Clin J Am Soc Nephrol 2007;2:162-74.
-  Figge J, et al. Anion gap and hypoalbuminemia. Crit Care Med 1998;26:1807-10.
-  ARDS Definition Task Force. Acute respiratory distress syndrome:
-    the Berlin Definition. JAMA 2012;307:2526-33.
-  Berend K. Diagnostic use of base excess in acid-base disorders.
-    N Engl J Med 2018;378:1419-28.
-  Batlle DC, et al. The use of the urinary anion gap in the diagnosis of
-    hyperchloremic metabolic acidosis. N Engl J Med 1988;318:594-9.
-  Kraut JA, Madias NE. Differential diagnosis of nongap metabolic acidosis:
-    value of a systematic approach. Clin J Am Soc Nephrol 2012;7:671-9.
-  Kraut JA, Kurtz I. Toxic alcohol ingestions: clinical features, diagnosis,
-    and management. Clin J Am Soc Nephrol 2008;3:208-25.
-  Funder JW, et al. Management of primary aldosteronism: Endocrine Society
-    clinical practice guideline. J Clin Endocrinol Metab 2016;101:1889-916.`);
+`);
   }
 
   const api = { render, interpret, consistency, detectPrimary, compensation, anionGap, oxygenation, ventilation, baseExcess };
